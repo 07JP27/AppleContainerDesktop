@@ -5,6 +5,8 @@ enum AppColors {
     static let surface = dynamic(light: rgb(1.0000, 1.0000, 1.0000), dark: rgb(0.1050, 0.1150, 0.1320))
     static let sidebar = dynamic(light: rgb(0.9480, 0.9560, 0.9710), dark: rgb(0.0830, 0.0920, 0.1080))
     static let border = dynamic(light: rgb(0.8350, 0.8500, 0.8750), dark: rgb(0.2200, 0.2350, 0.2600))
+    static let control = dynamic(light: rgb(0.9460, 0.9520, 0.9640), dark: rgb(0.1450, 0.1550, 0.1720))
+    static let controlHover = dynamic(light: rgb(0.9180, 0.9280, 0.9460), dark: rgb(0.1780, 0.1900, 0.2100))
     static let ink = dynamic(light: rgb(0.0808, 0.1006, 0.1328), dark: rgb(0.8962, 0.9027, 0.9131))
     static let muted = dynamic(light: rgb(0.3546, 0.3737, 0.4045), dark: rgb(0.6600, 0.6800, 0.7200))
     static let primary = dynamic(light: rgb(0.7206, 0.5018, 0.0648), dark: rgb(0.8099, 0.6036, 0.2656))

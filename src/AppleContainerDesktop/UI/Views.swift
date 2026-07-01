@@ -418,24 +418,35 @@ final class CardView: NSView {
 }
 
 final class PageHeaderView: NSView {
+    private let stack = NSStackView()
+
     init(title: String, subtitle: String) {
         super.init(frame: .zero)
 
-        let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = AppSpacing.xs
         stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.setContentHuggingPriority(.required, for: .vertical)
+        stack.setContentCompressionResistancePriority(.required, for: .vertical)
 
-        stack.addArrangedSubview(NSTextField.label(title, font: AppFonts.title))
+        let titleLabel = NSTextField.label(title, font: AppFonts.title)
+        titleLabel.setContentHuggingPriority(.required, for: .vertical)
+        titleLabel.setContentCompressionResistancePriority(.required, for: .vertical)
+        stack.addArrangedSubview(titleLabel)
 
         let subtitleLabel = NSTextField(wrappingLabelWithString: subtitle)
         subtitleLabel.font = AppFonts.body
         subtitleLabel.textColor = AppColors.muted
         subtitleLabel.maximumNumberOfLines = 2
+        subtitleLabel.alignment = .left
+        subtitleLabel.setContentHuggingPriority(.required, for: .vertical)
+        subtitleLabel.setContentCompressionResistancePriority(.required, for: .vertical)
         stack.addArrangedSubview(subtitleLabel)
 
         addSubview(stack)
+        setContentHuggingPriority(.required, for: .vertical)
+        setContentCompressionResistancePriority(.required, for: .vertical)
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: leadingAnchor),
             stack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
@@ -446,6 +457,10 @@ final class PageHeaderView: NSView {
 
     required init?(coder: NSCoder) {
         nil
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: stack.fittingSize.height)
     }
 }
 
@@ -468,6 +483,147 @@ final class ClosureButton: NSButton {
 
     @objc private func runAction() {
         closure()
+    }
+}
+
+final class ToolbarActionButton: NSControl {
+    private let titleLabel = NSTextField.label("", font: AppFonts.body)
+    private let chevronView: NSImageView?
+    private let actionHandler: (ToolbarActionButton) -> Void
+    private var trackingArea: NSTrackingArea?
+    private var isHovered = false
+    private var isPressed = false
+    private let showsMenuIndicator: Bool
+
+    init(title: String, showsMenuIndicator: Bool = false, action: @escaping (ToolbarActionButton) -> Void) {
+        self.showsMenuIndicator = showsMenuIndicator
+        actionHandler = action
+        if showsMenuIndicator {
+            let image = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: nil)
+            chevronView = NSImageView(image: image ?? NSImage())
+        } else {
+            chevronView = nil
+        }
+        super.init(frame: .zero)
+
+        wantsLayer = true
+        focusRingType = .exterior
+        translatesAutoresizingMaskIntoConstraints = false
+
+        titleLabel.stringValue = title
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(titleLabel)
+
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+        setAccessibilityLabel(title)
+
+        var constraints: [NSLayoutConstraint] = [
+            heightAnchor.constraint(equalToConstant: 28),
+            titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: AppSpacing.md),
+            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor)
+        ]
+
+        if let chevronView {
+            chevronView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 10, weight: .semibold)
+            chevronView.contentTintColor = AppColors.muted
+            chevronView.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(chevronView)
+            constraints += [
+                chevronView.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: AppSpacing.xs),
+                chevronView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -AppSpacing.sm),
+                chevronView.centerYAnchor.constraint(equalTo: centerYAnchor),
+                chevronView.widthAnchor.constraint(equalToConstant: 10),
+                chevronView.heightAnchor.constraint(equalToConstant: 10)
+            ]
+        } else {
+            constraints.append(titleLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -AppSpacing.md))
+        }
+
+        NSLayoutConstraint.activate(constraints)
+        applyColors()
+    }
+
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override var intrinsicContentSize: NSSize {
+        let labelWidth = titleLabel.intrinsicContentSize.width
+        let indicatorWidth: CGFloat = showsMenuIndicator ? 18 : 0
+        let minimumWidth: CGFloat = showsMenuIndicator ? 70 : 58
+        return NSSize(width: max(minimumWidth, ceil(labelWidth + indicatorWidth + 24)), height: 28)
+    }
+
+    override var acceptsFirstResponder: Bool {
+        true
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        let next = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(next)
+        trackingArea = next
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovered = true
+        applyColors()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovered = false
+        applyColors()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard isEnabled else { return }
+        window?.makeFirstResponder(self)
+        isPressed = true
+        applyColors()
+        defer {
+            isPressed = false
+            applyColors()
+        }
+
+        guard let mouseUp = window?.nextEvent(matching: [.leftMouseUp]) else {
+            return
+        }
+        let point = convert(mouseUp.locationInWindow, from: nil)
+        if bounds.contains(point) {
+            actionHandler(self)
+        }
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 36 || event.charactersIgnoringModifiers == " " {
+            actionHandler(self)
+            return
+        }
+        super.keyDown(with: event)
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyColors()
+    }
+
+    private func applyColors() {
+        layer?.cornerRadius = 7
+        layer?.borderWidth = 1
+        layer?.borderColor = resolvedCGColor(AppColors.border)
+        layer?.backgroundColor = resolvedCGColor(isHovered || isPressed ? AppColors.controlHover : AppColors.control)
+        titleLabel.textColor = isEnabled ? AppColors.ink : AppColors.muted
+        chevronView?.contentTintColor = isEnabled ? AppColors.muted : AppColors.border
     }
 }
 
@@ -494,6 +650,7 @@ extension NSTextField {
         let label = NSTextField(labelWithString: text)
         label.font = font
         label.textColor = color
+        label.alignment = .left
         return label
     }
 }

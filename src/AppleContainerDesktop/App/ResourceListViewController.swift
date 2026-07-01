@@ -21,12 +21,14 @@ final class ResourceListViewController: NSViewController, NSTableViewDataSource,
     private let onBuildRequested: (@MainActor () -> Void)?
 
     private let stack = NSStackView()
+    private let tableToolbarRow = NSStackView()
     private let actionRow = NSStackView()
     private let tableCard = CardView(spacing: AppSpacing.md)
     private let tableScrollView = NSScrollView()
     private let searchField = NSSearchField()
     private let tableView = NSTableView()
     private let statusLabel = NSTextField.label("", color: AppColors.muted)
+    private var tableHeightConstraint: NSLayoutConstraint?
     private var tableStateView: NSView?
     private var snapshot: ResourceListSnapshot?
     private var rows: [ResourceListItem] = []
@@ -71,25 +73,25 @@ final class ResourceListViewController: NSViewController, NSTableViewDataSource,
     private func buildLayout() {
         stack.orientation = .vertical
         stack.alignment = .width
-        stack.spacing = AppSpacing.xl
+        stack.spacing = AppSpacing.lg
         stack.translatesAutoresizingMaskIntoConstraints = false
 
         let header = NSStackView()
-        header.orientation = .horizontal
-        header.alignment = .top
-        header.spacing = AppSpacing.lg
+        header.orientation = .vertical
+        header.alignment = .leading
+        header.spacing = AppSpacing.xs
+        header.setContentHuggingPriority(.required, for: .vertical)
+        header.setContentCompressionResistancePriority(.required, for: .vertical)
 
         let titleStack = NSStackView()
         titleStack.orientation = .vertical
         titleStack.alignment = .leading
         titleStack.spacing = AppSpacing.xs
+        titleStack.setContentHuggingPriority(.required, for: .vertical)
+        titleStack.setContentCompressionResistancePriority(.required, for: .vertical)
         titleStack.addArrangedSubview(PageHeaderView(title: kind.rawValue, subtitle: pageSubtitle))
         titleStack.addArrangedSubview(statusLabel)
-
-        let controlStack = NSStackView()
-        controlStack.orientation = .vertical
-        controlStack.alignment = .trailing
-        controlStack.spacing = AppSpacing.sm
+        header.addArrangedSubview(titleStack)
 
         searchField.placeholderString = "Search \(kind.rawValue.lowercased())"
         searchField.setAccessibilityLabel("Search \(kind.rawValue.lowercased())")
@@ -97,18 +99,30 @@ final class ResourceListViewController: NSViewController, NSTableViewDataSource,
         searchField.delegate = self
         searchField.target = self
         searchField.action = #selector(searchChanged)
+        searchField.controlSize = .regular
         searchField.translatesAutoresizingMaskIntoConstraints = false
-        searchField.widthAnchor.constraint(equalToConstant: 280).isActive = true
+        searchField.widthAnchor.constraint(equalToConstant: 220).isActive = true
+        searchField.heightAnchor.constraint(equalToConstant: 28).isActive = true
+        searchField.setContentHuggingPriority(.required, for: .horizontal)
+        searchField.setContentCompressionResistancePriority(.required, for: .horizontal)
 
-        header.addArrangedSubview(titleStack)
-        header.addArrangedSubview(NSView())
-        controlStack.addArrangedSubview(searchField)
-        controlStack.addArrangedSubview(actionRow)
-        header.addArrangedSubview(controlStack)
+        tableToolbarRow.orientation = .horizontal
+        tableToolbarRow.alignment = .centerY
+        tableToolbarRow.spacing = AppSpacing.md
+
+        let toolbarSpacer = NSView()
+        toolbarSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        toolbarSpacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         actionRow.orientation = .horizontal
-        actionRow.spacing = AppSpacing.sm
+        actionRow.spacing = 6
         actionRow.alignment = .centerY
+        actionRow.setContentHuggingPriority(.required, for: .horizontal)
+        actionRow.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        tableToolbarRow.addArrangedSubview(actionRow)
+        tableToolbarRow.addArrangedSubview(toolbarSpacer)
+        tableToolbarRow.addArrangedSubview(searchField)
 
         tableView.delegate = self
         tableView.dataSource = self
@@ -134,22 +148,25 @@ final class ResourceListViewController: NSViewController, NSTableViewDataSource,
         tableScrollView.drawsBackground = false
         tableScrollView.translatesAutoresizingMaskIntoConstraints = false
 
+        tableCard.stack.addArrangedSubview(tableToolbarRow)
         tableCard.stack.addArrangedSubview(tableScrollView)
+        tableToolbarRow.widthAnchor.constraint(equalTo: tableCard.stack.widthAnchor).isActive = true
 
         stack.addFullWidthArrangedSubview(header)
         stack.addFullWidthArrangedSubview(tableCard)
+        stack.setCustomSpacing(AppSpacing.md, after: header)
 
         view.addSubview(stack)
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: AppSpacing.xxl),
             stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -AppSpacing.xxl),
             stack.topAnchor.constraint(equalTo: view.topAnchor, constant: AppSpacing.xxl),
-            stack.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -AppSpacing.xxl),
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: view.bottomAnchor, constant: -AppSpacing.xxl),
             tableScrollView.widthAnchor.constraint(equalTo: tableCard.stack.widthAnchor)
         ])
-        let tableHeight = tableScrollView.heightAnchor.constraint(greaterThanOrEqualToConstant: 360)
-        tableHeight.priority = .defaultHigh
-        tableHeight.isActive = true
+        tableHeightConstraint = tableScrollView.heightAnchor.constraint(greaterThanOrEqualToConstant: 360)
+        tableHeightConstraint?.priority = .defaultHigh
+        tableHeightConstraint?.isActive = true
         rebuildActions()
     }
 
@@ -179,6 +196,7 @@ final class ResourceListViewController: NSViewController, NSTableViewDataSource,
     }
 
     private func loadResources() {
+        statusLabel.isHidden = false
         statusLabel.stringValue = "Loading \(kind.rawValue.lowercased())..."
         Task { [kind, service, weak self] in
             let snapshot = await service.load(kind: kind)
@@ -194,10 +212,10 @@ final class ResourceListViewController: NSViewController, NSTableViewDataSource,
         applyFilter()
 
         if !snapshot.detection.isAvailable {
-            statusLabel.stringValue = "Apple container CLI is required."
+            statusLabel.isHidden = true
             showTableState(
                 title: "Install Apple container to view \(snapshot.kind.rawValue.lowercased())",
-                message: "Install Apple's signed container CLI, then press Refresh. The app will not show fake resources or enable actions until the executable is detected.",
+                message: "Install Apple's signed container CLI, then choose View > Refresh or press Command-R. The app will not show fake resources or enable actions until the executable is detected.",
                 actionTitle: "Download installer..."
             ) {
                 if let url = URL(string: "https://github.com/apple/container/releases") {
@@ -207,6 +225,7 @@ final class ResourceListViewController: NSViewController, NSTableViewDataSource,
             onInspectorUpdate(.empty)
         } else if let errorMessage = snapshot.errorMessage {
             let detail = snapshot.errorDetail.map { "\n\($0)" } ?? ""
+            statusLabel.isHidden = false
             statusLabel.stringValue = "\(errorMessage)\(detail)"
             showTableState(
                 title: "Could not load \(snapshot.kind.rawValue.lowercased())",
@@ -217,10 +236,11 @@ final class ResourceListViewController: NSViewController, NSTableViewDataSource,
             }
             onInspectorUpdate(.empty)
         } else if snapshot.items.isEmpty {
-            statusLabel.stringValue = snapshot.kind.emptyMessage
+            statusLabel.isHidden = true
             showTableState(title: "No \(snapshot.kind.rawValue.lowercased())", message: snapshot.kind.emptyMessage)
             onInspectorUpdate(.empty)
         } else {
+            statusLabel.isHidden = false
             statusLabel.stringValue = "\(snapshot.items.count) item(s)"
             showTable()
             if tableView.selectedRow < 0 {
@@ -252,6 +272,7 @@ final class ResourceListViewController: NSViewController, NSTableViewDataSource,
             tableStateView.removeFromSuperview()
         }
         tableStateView = nil
+        tableHeightConstraint?.isActive = true
         tableScrollView.isHidden = false
     }
 
@@ -260,6 +281,7 @@ final class ResourceListViewController: NSViewController, NSTableViewDataSource,
             tableCard.stack.removeArrangedSubview(tableStateView)
             tableStateView.removeFromSuperview()
         }
+        tableHeightConstraint?.isActive = false
         tableScrollView.isHidden = true
 
         let state = NSStackView()
@@ -281,42 +303,58 @@ final class ResourceListViewController: NSViewController, NSTableViewDataSource,
             state.addArrangedSubview(button)
         }
 
-        tableCard.stack.insertArrangedSubview(state, at: 0)
+        tableCard.stack.insertArrangedSubview(state, at: min(1, tableCard.stack.arrangedSubviews.count))
+        state.widthAnchor.constraint(equalTo: tableCard.stack.widthAnchor).isActive = true
         tableStateView = state
     }
 
     private func rebuildActions() {
         actionRow.setViews([], in: .leading)
+        actionRow.isHidden = false
         guard snapshot?.detection.isAvailable == true else {
-            let message = snapshot == nil
-                ? "Checking Apple container availability..."
-                : "Install Apple container CLI to enable actions."
-            actionRow.addArrangedSubview(NSTextField.label(message, font: AppFonts.small, color: AppColors.muted))
+            actionRow.isHidden = true
             return
         }
 
-        let primaryActions = dedupe(availablePrimaryActions())
+        let rawPrimaryActions = dedupe(availablePrimaryActions())
+        let primaryActions = rawPrimaryActions.filter { !$0.isDestructive }
         for action in primaryActions {
-            let button = ClosureButton(title: action.title, action: action.run)
-            button.bezelStyle = action.isDestructive ? .rounded : .texturedRounded
-            button.controlSize = .small
-            actionRow.addArrangedSubview(button)
+            actionRow.addArrangedSubview(toolbarButton(for: action))
         }
 
-        let secondaryActions = dedupe(availableSecondaryActions(excluding: Set(primaryActions.map(\.title))))
+        let secondaryActions = dedupe(
+            rawPrimaryActions.filter(\.isDestructive)
+                + availableSecondaryActions(excluding: Set(primaryActions.map(\.title)))
+        )
         if !secondaryActions.isEmpty {
-            let menuButton = NSPopUpButton()
-            menuButton.controlSize = .small
-            menuButton.pullsDown = true
-            menuButton.addItem(withTitle: "More")
-            for action in secondaryActions {
-                menuButton.menu?.addItem(ClosureMenuItem(title: action.title, action: action.run))
-            }
-            actionRow.addArrangedSubview(menuButton)
+            actionRow.addArrangedSubview(moreActionsButton(for: secondaryActions))
         }
 
         if actionRow.arrangedSubviews.isEmpty {
-            actionRow.addArrangedSubview(NSTextField.label("No actions are available for the current selection.", font: AppFonts.small, color: AppColors.muted))
+            actionRow.isHidden = true
+        }
+    }
+
+    private func toolbarButton(for action: ResourceAction) -> ToolbarActionButton {
+        ToolbarActionButton(title: action.title) { _ in
+            action.run()
+        }
+    }
+
+    private func moreActionsButton(for actions: [ResourceAction]) -> ToolbarActionButton {
+        ToolbarActionButton(title: "More", showsMenuIndicator: true) { button in
+            let menu = NSMenu()
+            actions.forEach { action in
+                let item = ClosureMenuItem(title: action.title, action: action.run)
+                if action.isDestructive {
+                    item.attributedTitle = NSAttributedString(
+                        string: action.title,
+                        attributes: [.foregroundColor: AppColors.danger]
+                    )
+                }
+                menu.addItem(item)
+            }
+            menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height + 4), in: button)
         }
     }
 
@@ -355,7 +393,7 @@ final class ResourceListViewController: NSViewController, NSTableViewDataSource,
         case .images:
             if selected != nil {
                 return [
-                    action("Build") { [weak self] in self?.onBuildRequested?() },
+                    action("Run") { [weak self] in self?.runSelectedImage() },
                     action("Tag") { [weak self] in self?.runImageOperation(.tag) },
                     action("Push") { [weak self] in self?.runImageOperation(.push) }
                 ]
@@ -425,6 +463,7 @@ final class ResourceListViewController: NSViewController, NSTableViewDataSource,
             ]
             if selected != nil {
                 result += [
+                    action("Run") { [weak self] in self?.runSelectedImage() },
                     action("Push") { [weak self] in self?.runImageOperation(.push) },
                     action("Tag") { [weak self] in self?.runImageOperation(.tag) },
                     action("Delete", destructive: true) { [weak self] in self?.runImageOperation(.delete) }
@@ -733,8 +772,8 @@ final class ResourceListViewController: NSViewController, NSTableViewDataSource,
         }
     }
 
-            private func runContainerCreateOrRun(_ operation: ContainerOperation) {
-                guard let request = promptForCreateRun(operation) else {
+            private func runContainerCreateOrRun(_ operation: ContainerOperation, imageReference: String = "") {
+                guard let request = promptForCreateRun(operation, imageReference: imageReference) else {
                     return
                 }
 
@@ -760,7 +799,15 @@ final class ResourceListViewController: NSViewController, NSTableViewDataSource,
                 }
             }
 
-            private func promptForCreateRun(_ operation: ContainerOperation) -> ContainerCreateRunRequest? {
+            private func runSelectedImage() {
+                guard kind == .images, let selected = selectedItem() else {
+                    onInspectorUpdate(InspectorSnapshot(title: "Run", subtitle: "Select an image first.", command: nil, detail: nil, json: nil))
+                    return
+                }
+                runContainerCreateOrRun(.run, imageReference: selected.title)
+            }
+
+            private func promptForCreateRun(_ operation: ContainerOperation, imageReference: String = "") -> ContainerCreateRunRequest? {
                 let alert = NSAlert()
                 alert.messageText = operation == .run ? "Run container" : "Create container"
                 alert.informativeText = operation == .run ? "Run uses --detach so the app does not block on the container process." : "Create prepares a container without starting it."
@@ -770,7 +817,7 @@ final class ResourceListViewController: NSViewController, NSTableViewDataSource,
                 let form = NSStackView()
                 form.orientation = .vertical
                 form.spacing = AppSpacing.sm
-                let image = NSTextField(string: "")
+                let image = NSTextField(string: imageReference)
                 image.placeholderString = "image, e.g. ubuntu:latest"
                 image.setAccessibilityLabel("Image reference")
                 let name = NSTextField(string: "")

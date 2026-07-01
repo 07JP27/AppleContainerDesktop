@@ -46,6 +46,23 @@ final class ContainerCLIClientTests: XCTestCase {
         XCTAssertEqual(runner.commands.first?.timeout, 95)
     }
 
+    func testSystemStopUsesStopCommand() async throws {
+        let runner = RecordingRunner(
+            result: CLIProcessResult(
+                preview: CLICommandPreview(executable: "/fake/container", arguments: []),
+                exitCode: 0,
+                stdout: "",
+                stderr: ""
+            )
+        )
+        let client = ContainerCLIClient(executableURL: URL(fileURLWithPath: "/fake/container"), runner: runner)
+
+        _ = try await client.stopSystem(timeout: 45)
+
+        XCTAssertEqual(runner.commands.first?.arguments, ["system", "stop"])
+        XCTAssertEqual(runner.commands.first?.timeout, 45)
+    }
+
     func testRegistryLoginWritesPasswordToStdin() async throws {
         let runner = RecordingRunner(
             result: CLIProcessResult(

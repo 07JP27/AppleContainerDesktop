@@ -10,7 +10,7 @@ enum ServiceHealth: Equatable, Sendable {
     var label: String {
         switch self {
         case .missingCLI:
-            "Missing CLI"
+            "Runtime unavailable"
         case .running:
             "Running"
         case .stopped:

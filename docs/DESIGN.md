@@ -65,17 +65,18 @@ The app uses a three-zone macOS layout.
 2. Primary content: object table, build form, operation history, settings surface, or runtime detail when opened from the status indicator.
 3. Detail / inspector: selected item summary, JSON inspect, logs, actions, metadata.
 
-Toolbar actions are contextual. Global actions include refresh and settings. Destructive actions never sit as the primary toolbar action.
+The titlebar stays quiet: global actions live in menus and navigation rather than duplicated titlebar icons. Refresh is available from View > Refresh / Command-R; Settings remains available from the sidebar and app menu. Destructive actions never sit as a titlebar action.
 
 ## Navigation
 
-- Runtime is not a primary navigation item. It is a compact bottom status indicator; opening it shows CLI availability, service health, versions, disk usage, builder controls, machine entry, and recent operations.
+- Runtime is not a primary navigation item. It is a compact bottom status indicator; opening it shows CLI availability, service health, versions, disk usage, and lifecycle controls.
+- The compact runtime status indicator always names runtime state. If Apple container CLI is missing, the indicator says the runtime is unavailable and the Runtime screen explains that the missing CLI is the cause.
 - Runtime remains keyboard-accessible from View > Runtime Status (`⌘0`) because it can contain required service-start controls.
 - The default surface is Containers. If `container` is missing, resource lists show a concise install-required state with Apple's signed GitHub Release installer package as the primary path.
 - Containers uses a table-first layout with a persistent detail inspector.
 - Images uses table + tag / digest metadata + pull / push / build operations.
 - Build image is an Images action with command preview and streamed progress output, not a top-level collection.
-- Machines are runtime control state, not a primary object collection.
+- Machines and builder controls are technical runtime details and stay out of the default Runtime screen.
 - Operations exposes command history and execution results.
 - Logs and exec use a terminal-like panel but keep app chrome native.
 - Settings groups runtime properties, CLI path, service control, resource defaults, and accessibility preferences.
@@ -93,6 +94,10 @@ Status chips combine shape, text, and semantic color. Running, stopped, unhealth
 ### Operation rows
 
 Long-running operations appear as rows with progress, command preview, elapsed time, stdout / stderr expansion, cancel when supported, and final result.
+
+### Technical details
+
+Raw command output and JSON are hidden by default on primary screens. Surface them for failures, explicit technical-detail disclosure, or Operations / inspector contexts. The default UI should show state, value, and next action before implementation details.
 
 ### Forms
 

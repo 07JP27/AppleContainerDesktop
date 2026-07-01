@@ -170,7 +170,7 @@ UI は Docker Desktop の代替品ではなく、Apple `container` CLI を扱う
   - Sidebar: Containers、Images、Networks、Volumes、Registries、Operations、Settings と下部 runtime status indicator
   - Main: table、list、form、runtime control、settings
   - Inspector: 選択項目の metadata、JSON inspect、logs、actions
-- Runtime detail は主ナビではなく、下部 status indicator から開く。CLI / API server version、disk usage、builder controls、machine entry、recent operations を扱う。
+- Runtime detail は主ナビではなく、下部 status indicator から開く。CLI / API server version、disk usage、lifecycle controls を扱う。
 - Runtime detail は View > Runtime Status (`⌘0`) からも開ける。runtime は主ナビではないが、service start が必要な場合に keyboard / VoiceOver で到達可能にする。
 - Build は top-level object collection ではなく Images の action として扱う。
 - Machines は top-level collection ではなく runtime control state として扱う。
