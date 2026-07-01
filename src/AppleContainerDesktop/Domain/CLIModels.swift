@@ -80,6 +80,22 @@ struct SystemStartOutcome: Equatable, Sendable {
     }
 }
 
+struct SystemRestartOutcome: Equatable, Sendable {
+    var stopOutcome: SystemStartOutcome
+    var startOutcome: SystemStartOutcome?
+
+    var succeeded: Bool {
+        stopOutcome.succeeded && startOutcome?.succeeded == true
+    }
+
+    var detail: String {
+        if !stopOutcome.succeeded {
+            return stopOutcome.detail
+        }
+        return startOutcome?.detail ?? ""
+    }
+}
+
 enum CLIClientError: Error, Equatable, Sendable {
     case processFailed(CLIProcessResult)
     case decodingFailed(command: CLICommandPreview, output: String)

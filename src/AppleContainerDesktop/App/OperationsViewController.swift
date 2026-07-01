@@ -58,14 +58,14 @@ final class OperationsViewController: NSViewController, ContentReloading {
 
     func reloadContent() {
         stack.setViews([], in: .top)
-        stack.addFullWidthArrangedSubview(PageHeaderView(title: "Operations", subtitle: "Command history and execution results from resource actions. Live output is shown while an operation runs; persisted history stores command, status, exit code, and time."))
+        stack.addFullWidthArrangedSubview(PageHeaderView(title: "Operations", subtitle: "Command history."))
 
         let records = historyStore.recent(limit: 50)
         let card = CardView(spacing: AppSpacing.md)
         card.stack.addArrangedSubview(NSTextField.label("Recent operations", font: AppFonts.heading))
 
         guard !records.isEmpty else {
-            let empty = NSTextField(wrappingLabelWithString: "No operations have run yet. Start, stop, pull, build, login, or other resource actions will appear here.")
+            let empty = NSTextField(wrappingLabelWithString: "No operations yet.")
             empty.font = AppFonts.body
             empty.textColor = AppColors.muted
             empty.maximumNumberOfLines = 3

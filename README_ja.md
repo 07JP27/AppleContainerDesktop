@@ -4,6 +4,12 @@ Apple Container Desktop は、Apple `container` CLI を macOS ネイティブ GU
 
 MVP では system status、初回オンボーディング、containers、images、builds、networks、volumes、registry、machines、settings をローカル操作として扱います。Docker Engine API 互換、`docker` CLI 互換 layer、Kubernetes 管理、外部 telemetry、Apple `container` の fork は含みません。
 
+## スクリーンショット
+
+![Resource list と empty state を表示している Containers 画面](docs/screenshots/containers.png)
+
+![Service controls と status details を表示している Runtime status 画面](docs/screenshots/runtime.png)
+
 ## 必須環境
 
 - Apple silicon Mac
@@ -29,7 +35,7 @@ make run
 
 ## MVP 実装範囲
 
-- Runtime status: sidebar 下部の compact indicator から開く CLI 検出、system status/version/df、kernel install 方針を明示した service start、builder controls、machine state entry、recent operation history。
+- Runtime status: sidebar 下部の compact indicator から開く CLI 検出、system status/version/df、lifecycle controls。
 - Resources: containers、images、networks、volumes、registries の検索/ソート可能な object list と JSON inspect。
 - Operations: command history、container create/run/start/stop/kill/delete/logs/stats/copy/export/Terminal exec/prune、image pull/build/push/tag/delete/prune、builder start/stop/delete/status、network/volume create/delete/prune、registry login/logout、machine logs/stop/delete/set-default。
 - Settings: CLI executable override、検出詳細、service status、read-only runtime properties。

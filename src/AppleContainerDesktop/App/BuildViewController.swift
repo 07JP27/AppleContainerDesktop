@@ -70,7 +70,7 @@ final class BuildViewController: NSViewController, ContentReloading {
 
     private func render() {
         stack.setViews([], in: .top)
-        stack.addFullWidthArrangedSubview(PageHeaderView(title: "Build image", subtitle: "Build a Dockerfile into a local image. Builder controls are system-level operations, not a separate object collection."))
+        stack.addFullWidthArrangedSubview(PageHeaderView(title: "Build image", subtitle: "Build a Dockerfile into a local image."))
 
         let buildCard = CardView(spacing: AppSpacing.md)
         buildCard.stack.addArrangedSubview(NSTextField.label("Dockerfile build", font: AppFonts.heading))

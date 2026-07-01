@@ -63,7 +63,7 @@ final class SettingsViewController: NSViewController, ContentReloading {
 
     private func renderLoading() {
         stack.setViews([], in: .top)
-        stack.addFullWidthArrangedSubview(PageHeaderView(title: "Settings", subtitle: "Loading container CLI settings..."))
+        stack.addFullWidthArrangedSubview(PageHeaderView(title: "Settings", subtitle: "Loading..."))
     }
 
     private func loadSettings() {
@@ -77,7 +77,7 @@ final class SettingsViewController: NSViewController, ContentReloading {
 
     private func render(_ snapshot: SettingsSnapshot) {
         stack.setViews([], in: .top)
-        stack.addFullWidthArrangedSubview(PageHeaderView(title: "Settings", subtitle: "Control how the app finds Apple container and review read-only runtime properties."))
+        stack.addFullWidthArrangedSubview(PageHeaderView(title: "Settings", subtitle: "CLI path and runtime details."))
 
         let cliCard = CardView(spacing: AppSpacing.md)
         cliCard.stack.addArrangedSubview(NSTextField.label("CLI executable", font: AppFonts.heading))
@@ -118,14 +118,36 @@ final class SettingsViewController: NSViewController, ContentReloading {
 
         let propertiesCard = CardView(spacing: AppSpacing.md)
         propertiesCard.stack.addArrangedSubview(NSTextField.label("Runtime properties", font: AppFonts.heading))
-        if let command = snapshot.command {
-            propertiesCard.stack.addArrangedSubview(keyValue("Properties command", command.displayString, monospaced: true))
-        }
         if let errorMessage = snapshot.errorMessage {
-            propertiesCard.stack.addArrangedSubview(keyValue("Properties", errorMessage))
+            propertiesCard.stack.addArrangedSubview(keyValue("Error", errorMessage))
         }
         if let propertiesJSON = snapshot.propertiesJSON {
-            propertiesCard.stack.addArrangedSubview(keyValue("Read-only JSON", propertiesJSON, monospaced: true, maxLines: 80))
+            let detailsStack = NSStackView()
+            detailsStack.orientation = .vertical
+            detailsStack.alignment = .width
+            detailsStack.spacing = AppSpacing.sm
+
+            var detailButton: ClosureButton?
+            detailButton = ClosureButton(title: "Show properties JSON") { [weak self, weak detailsStack] in
+                guard let self, let detailsStack else { return }
+                if detailsStack.arrangedSubviews.isEmpty {
+                    if let command = snapshot.command {
+                        detailsStack.addArrangedSubview(self.keyValue("Command", command.displayString, monospaced: true))
+                    }
+                    detailsStack.addArrangedSubview(self.keyValue("JSON", propertiesJSON, monospaced: true, maxLines: 80))
+                    detailButton?.title = "Hide properties JSON"
+                } else {
+                    detailsStack.setViews([], in: .top)
+                    detailButton?.title = "Show properties JSON"
+                }
+            }
+            if let detailButton {
+                detailButton.controlSize = .small
+                detailButton.bezelStyle = .texturedRounded
+                propertiesCard.stack.addArrangedSubview(detailButton)
+            }
+            propertiesCard.stack.addArrangedSubview(detailsStack)
+            detailsStack.widthAnchor.constraint(equalTo: propertiesCard.stack.widthAnchor).isActive = true
         }
         stack.addFullWidthArrangedSubview(propertiesCard)
     }

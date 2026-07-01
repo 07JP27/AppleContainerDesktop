@@ -2,26 +2,15 @@ import AppKit
 
 final class SystemViewController: NSViewController, ContentReloading {
     private let systemService: SystemService
-    private let resourceService: ResourceService
-    private let operationService: OperationService
-    private let historyStore: OperationHistoryStoring
     private let onRuntimeStatusChange: @MainActor () -> Void
     private let scrollView = NSScrollView()
     private let stack = NSStackView()
-    private weak var builderResultStack: NSStackView?
-    private weak var machineResultStack: NSStackView?
 
     init(
         systemService: SystemService = SystemService(),
-        resourceService: ResourceService = ResourceService(),
-        operationService: OperationService = OperationService(),
-        historyStore: OperationHistoryStoring = UserDefaultsOperationHistoryStore(),
         onRuntimeStatusChange: @escaping @MainActor () -> Void = {}
     ) {
         self.systemService = systemService
-        self.resourceService = resourceService
-        self.operationService = operationService
-        self.historyStore = historyStore
         self.onRuntimeStatusChange = onRuntimeStatusChange
         super.init(nibName: nil, bundle: nil)
     }
@@ -80,50 +69,44 @@ final class SystemViewController: NSViewController, ContentReloading {
 
     private func renderLoading() {
         stack.setViews([], in: .top)
-        stack.addFullWidthArrangedSubview(PageHeaderView(title: "Runtime", subtitle: "Checking local container runtime status."))
-        addFullWidth(statusHero(title: "Checking runtime", message: "Reading CLI and service status.", health: .unknown, actions: []))
+        stack.addFullWidthArrangedSubview(PageHeaderView(title: "Runtime", subtitle: "Checking status."))
+        addFullWidth(statusHero(title: "Checking runtime", message: "Reading status.", health: .unknown, actions: []))
     }
 
     private func render(_ snapshot: SystemSnapshot) {
         stack.setViews([], in: .top)
 
         if snapshot.health == .missingCLI {
-            stack.addFullWidthArrangedSubview(PageHeaderView(title: "Runtime", subtitle: "Local Apple container runtime status."))
+            stack.addFullWidthArrangedSubview(PageHeaderView(title: "Runtime", subtitle: "Install Apple container CLI first."))
             addFullWidth(missingCLIGate(snapshot))
             return
         }
 
-        stack.addFullWidthArrangedSubview(PageHeaderView(title: "Runtime", subtitle: "Status and maintenance controls for the local Apple container runtime."))
+        stack.addFullWidthArrangedSubview(PageHeaderView(title: "Runtime", subtitle: "Status and controls."))
 
-        let actions = snapshot.health == .stopped ? [
-            ClosureButton(title: "Start runtime...") { [weak self] in
-                self?.confirmAndStartSystem()
-            }
-        ] : []
-        actions.first?.bezelStyle = .rounded
+        let actions = runtimeActions(for: snapshot.health)
 
         addFullWidth(
             statusHero(
                 title: heroTitle(for: snapshot.health),
-                message: snapshot.message,
+                message: heroMessage(for: snapshot),
                 health: snapshot.health,
                 actions: actions
             )
         )
         addFullWidth(systemCards(snapshot))
-        addFullWidth(systemControls())
 
-        if let errorDetail = snapshot.errorDetail, !errorDetail.isEmpty {
+        if shouldShowStatusDetail(for: snapshot), let errorDetail = snapshot.errorDetail, !errorDetail.isEmpty {
             addFullWidth(commandCard(title: "Status detail", value: errorDetail))
-        } else if let statusJSON = snapshot.statusJSON {
-            addFullWidth(commandCard(title: "Runtime status JSON", value: statusJSON))
         }
-
-        addFullWidth(recentOperationsCard())
     }
 
     private func addFullWidth(_ view: NSView) {
         stack.addFullWidthArrangedSubview(view)
+    }
+
+    private func shouldShowStatusDetail(for snapshot: SystemSnapshot) -> Bool {
+        snapshot.health != .stopped
     }
 
     private func statusHero(title: String, message: String, health: ServiceHealth, actions: [NSButton]) -> NSView {
@@ -158,13 +141,13 @@ final class SystemViewController: NSViewController, ContentReloading {
         releaseButton.bezelStyle = .rounded
 
         let card = CardView(spacing: AppSpacing.md)
-        card.stack.addArrangedSubview(StatusChipView(title: "Missing CLI", health: .missingCLI))
-        card.stack.addArrangedSubview(NSTextField.label("Apple container CLI is missing", font: AppFonts.heading))
+        card.stack.addArrangedSubview(StatusChipView(title: "Runtime unavailable", health: .missingCLI))
+        card.stack.addArrangedSubview(NSTextField.label("Runtime unavailable", font: AppFonts.heading))
 
-        let message = NSTextField(wrappingLabelWithString: "Install Apple's signed CLI, then press Refresh. This app never installs packages automatically.")
+        let message = NSTextField(wrappingLabelWithString: "Install Apple's signed CLI, then refresh.")
         message.font = AppFonts.body
         message.textColor = AppColors.muted
-        message.maximumNumberOfLines = 2
+        message.maximumNumberOfLines = 3
         card.stack.addArrangedSubview(message)
 
         let actions = NSStackView()
@@ -174,7 +157,7 @@ final class SystemViewController: NSViewController, ContentReloading {
         actions.addArrangedSubview(releaseButton)
         card.stack.addArrangedSubview(actions)
 
-        let details = NSTextField(wrappingLabelWithString: "Looked in PATH, /usr/local/bin/container, and /Library/Apple/usr/bin/container.")
+        let details = NSTextField(wrappingLabelWithString: "Checked PATH, /usr/local/bin/container, and /Library/Apple/usr/bin/container.")
         details.font = AppFonts.small
         details.textColor = AppColors.muted
         details.alignment = .left
@@ -188,40 +171,45 @@ final class SystemViewController: NSViewController, ContentReloading {
         let card = CardView(spacing: AppSpacing.md)
         card.stack.addArrangedSubview(NSTextField.label("Runtime status", font: AppFonts.heading))
         let statusTable = systemStatusTable([
-            ("Service", snapshot.health.label, snapshot.message),
+            ("Service", snapshot.health.label, nil),
             ("CLI", snapshot.version?.cliVersion ?? "Not available", snapshot.detection.executableURL?.path ?? "No executable detected"),
-            ("API server", snapshot.version?.apiServerVersion ?? "Not available", snapshot.lastCommand?.displayString ?? "Status command has not run"),
-            ("Disk usage", snapshot.diskUsageJSON == nil ? "Not available" : "Available", snapshot.diskUsageJSON == nil ? "Run service to read container storage." : "Raw df output is available in status detail."),
-            ("Install source", sourceLabel(for: snapshot.detection.source), snapshot.detection.problem ?? "Resolved from local machine.")
+            ("API server", snapshot.version?.apiServerVersion ?? "Not available", nil),
+            ("Disk usage", snapshot.diskUsageJSON == nil ? "Not available" : "Available", nil)
         ])
         card.stack.addArrangedSubview(statusTable)
         statusTable.widthAnchor.constraint(equalTo: card.stack.widthAnchor).isActive = true
         return card
     }
 
-    private func systemStatusTable(_ rows: [(String, String, String)]) -> NSStackView {
+    private func systemStatusTable(_ rows: [(String, String, String?)]) -> NSStackView {
         let table = NSStackView()
         table.orientation = .vertical
-        table.alignment = .width
+        table.alignment = .leading
         table.spacing = AppSpacing.md
-        rows.forEach { table.addArrangedSubview(systemStatusRow($0.0, $0.1, $0.2)) }
+        rows.forEach {
+            let row = systemStatusRow($0.0, $0.1, $0.2)
+            table.addArrangedSubview(row)
+            row.widthAnchor.constraint(equalTo: table.widthAnchor).isActive = true
+        }
         return table
     }
 
-    private func systemStatusRow(_ label: String, _ value: String, _ detail: String) -> NSView {
+    private func systemStatusRow(_ label: String, _ value: String, _ detail: String?) -> NSView {
         let row = NSStackView()
         row.orientation = .horizontal
         row.alignment = .top
         row.distribution = .fill
         row.spacing = AppSpacing.lg
+        row.translatesAutoresizingMaskIntoConstraints = false
         let keyLabel = NSTextField.label(label, font: AppFonts.body, color: AppColors.muted)
+        keyLabel.alignment = .left
         keyLabel.widthAnchor.constraint(equalToConstant: 116).isActive = true
         keyLabel.setContentHuggingPriority(.required, for: .horizontal)
         keyLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
 
         let content = NSStackView()
         content.orientation = .vertical
-        content.alignment = .width
+        content.alignment = .leading
         content.spacing = AppSpacing.xs
 
         let valueLabel = NSTextField(wrappingLabelWithString: value)
@@ -229,13 +217,15 @@ final class SystemViewController: NSViewController, ContentReloading {
         valueLabel.textColor = AppColors.ink
         valueLabel.maximumNumberOfLines = 2
         valueLabel.alignment = .left
-        let captionLabel = NSTextField(wrappingLabelWithString: detail)
-        captionLabel.font = AppFonts.small
-        captionLabel.textColor = AppColors.muted
-        captionLabel.maximumNumberOfLines = 2
-        captionLabel.alignment = .left
         content.addArrangedSubview(valueLabel)
-        content.addArrangedSubview(captionLabel)
+        if let detail, !detail.isEmpty {
+            let captionLabel = NSTextField(wrappingLabelWithString: detail)
+            captionLabel.font = AppFonts.small
+            captionLabel.textColor = AppColors.muted
+            captionLabel.maximumNumberOfLines = 2
+            captionLabel.alignment = .left
+            content.addArrangedSubview(captionLabel)
+        }
 
         row.addArrangedSubview(keyLabel)
         row.addArrangedSubview(content)
@@ -252,85 +242,7 @@ final class SystemViewController: NSViewController, ContentReloading {
         valueLabel.textColor = AppColors.ink
         valueLabel.maximumNumberOfLines = 10
         card.stack.addArrangedSubview(valueLabel)
-        return card
-    }
-
-    private func systemControls() -> NSView {
-        let row = NSStackView()
-        row.orientation = .horizontal
-        row.alignment = .top
-        row.distribution = .fillEqually
-        row.spacing = AppSpacing.md
-        row.addArrangedSubview(builderCard())
-        row.addArrangedSubview(machineCard())
-        return row
-    }
-
-    private func builderCard() -> NSView {
-        let card = CardView(spacing: AppSpacing.md)
-        card.stack.addArrangedSubview(NSTextField.label("Builder", font: AppFonts.heading))
-        let message = NSTextField(wrappingLabelWithString: "Build backend used by image builds.")
-        message.font = AppFonts.body
-        message.textColor = AppColors.muted
-        message.maximumNumberOfLines = 3
-        card.stack.addArrangedSubview(message)
-
-        let actions = NSStackView()
-        actions.orientation = .horizontal
-        actions.alignment = .centerY
-        actions.spacing = AppSpacing.sm
-        for operation in BuilderOperation.allCases {
-            let button = ClosureButton(title: operation.rawValue) { [weak self] in
-                self?.runBuilder(operation)
-            }
-            button.controlSize = .small
-            button.bezelStyle = operation.isDestructive ? .rounded : .texturedRounded
-            actions.addArrangedSubview(button)
-        }
-        card.stack.addArrangedSubview(actions)
-        let resultStack = makeInlineResultStack()
-        builderResultStack = resultStack
-        card.stack.addArrangedSubview(resultStack)
-        return card
-    }
-
-    private func machineCard() -> NSView {
-        let card = CardView(spacing: AppSpacing.md)
-        card.stack.addArrangedSubview(NSTextField.label("Machines", font: AppFonts.heading))
-        let message = NSTextField(wrappingLabelWithString: "Backing VM state for runtime diagnostics.")
-        message.font = AppFonts.body
-        message.textColor = AppColors.muted
-        message.maximumNumberOfLines = 3
-        card.stack.addArrangedSubview(message)
-        let button = ClosureButton(title: "Load machines") { [weak self] in
-            self?.loadMachines()
-        }
-        button.controlSize = .small
-        button.bezelStyle = .texturedRounded
-        card.stack.addArrangedSubview(button)
-        let resultStack = makeInlineResultStack()
-        machineResultStack = resultStack
-        card.stack.addArrangedSubview(resultStack)
-        return card
-    }
-
-    private func recentOperationsCard() -> NSView {
-        let card = CardView(spacing: AppSpacing.md)
-        card.stack.addArrangedSubview(NSTextField.label("Recent operations", font: AppFonts.heading))
-        let recent = historyStore.recent(limit: 5)
-        guard !recent.isEmpty else {
-            let emptyLabel = NSTextField(wrappingLabelWithString: "Operations you run from Containers, Images, Networks, Volumes, Registries, and runtime controls will appear here.")
-            emptyLabel.font = AppFonts.body
-            emptyLabel.textColor = AppColors.muted
-            emptyLabel.maximumNumberOfLines = 3
-            card.stack.addArrangedSubview(emptyLabel)
-            return card
-        }
-
-        for record in recent {
-            let state = record.succeeded ? "Succeeded" : "Failed"
-            card.stack.addArrangedSubview(keyValue(record.title, "\(state) · \(record.command)", monospaced: true, maxLines: 2))
-        }
+        valueLabel.widthAnchor.constraint(equalTo: card.stack.widthAnchor).isActive = true
         return card
     }
 
@@ -343,22 +255,48 @@ final class SystemViewController: NSViewController, ContentReloading {
         case .unhealthy:
             "Container runtime needs attention"
         case .missingCLI:
-            "Apple container CLI is not installed"
+            "Runtime unavailable"
         case .unknown:
             "Container runtime status is unclear"
         }
     }
 
-    private func sourceLabel(for source: CLIExecutableSource?) -> String {
-        switch source {
-        case .settingsOverride:
-            "Settings override"
-        case .path:
-            "PATH"
-        case .knownLocation:
-            "Known location"
-        case nil:
-            "Not detected"
+    private func heroMessage(for snapshot: SystemSnapshot) -> String {
+        switch snapshot.health {
+        case .running:
+            "Ready."
+        case .stopped:
+            "Stopped or unreachable."
+        case .unhealthy:
+            snapshot.message
+        case .missingCLI:
+            "CLI not found."
+        case .unknown:
+            "Status unknown."
+        }
+    }
+
+    private func runtimeActions(for health: ServiceHealth) -> [NSButton] {
+        switch health {
+        case .stopped:
+            let button = ClosureButton(title: "Start runtime...") { [weak self] in
+                self?.confirmAndStartSystem()
+            }
+            button.bezelStyle = .rounded
+            return [button]
+        case .running:
+            let stopButton = ClosureButton(title: "Stop runtime...") { [weak self] in
+                self?.confirmAndStopSystem()
+            }
+            stopButton.bezelStyle = .rounded
+
+            let restartButton = ClosureButton(title: "Restart runtime...") { [weak self] in
+                self?.confirmAndRestartSystem()
+            }
+            restartButton.bezelStyle = .texturedRounded
+            return [stopButton, restartButton]
+        case .missingCLI, .unhealthy, .unknown:
+            return []
         }
     }
 
@@ -393,158 +331,97 @@ final class SystemViewController: NSViewController, ContentReloading {
         }
 
         let enableKernelInstall = response == .alertSecondButtonReturn
-        addFullWidth(statusHero(title: "Starting runtime", message: "Running container system start with an explicit kernel-install choice.", health: .unknown, actions: []))
+        renderRuntimeProgress(title: "Starting runtime", message: "Starting...")
         Task { [systemService, weak self] in
             let outcome = await systemService.startSystem(enableKernelInstall: enableKernelInstall)
-            let snapshot = await systemService.loadSystemSnapshot()
-            await MainActor.run {
-                if !outcome.succeeded, !outcome.detail.isEmpty {
-                    self?.stack.addArrangedSubview(
-                        self?.commandCard(title: "Start failed", value: outcome.detail) ?? NSView()
-                    )
+            let snapshot: SystemSnapshot
+            if outcome.succeeded {
+                await MainActor.run {
+                    self?.renderRuntimeProgress(title: "Starting runtime", message: "Waiting for ready status.")
                 }
-                self?.render(snapshot)
-                self?.onRuntimeStatusChange()
+                snapshot = await systemService.waitForRunningSystemSnapshot()
+            } else {
+                snapshot = await systemService.loadSystemSnapshot()
             }
-        }
-    }
 
-    private func runBuilder(_ operation: BuilderOperation) {
-        if operation.isDestructive {
-            let alert = NSAlert()
-            alert.messageText = "Delete builder?"
-            alert.informativeText = "The builder will be removed and can be recreated with Builder Start."
-            alert.alertStyle = .warning
-            alert.addButton(withTitle: "Delete")
-            alert.addButton(withTitle: "Cancel")
-            guard alert.runModal() == .alertFirstButtonReturn else {
-                return
-            }
-        }
-
-        let preview = CLICommandPreview(executable: "container", arguments: operation.arguments())
-        setInlineResult(in: builderResultStack, title: "Builder \(operation.rawValue)", value: "Running \(preview.displayString)")
-        Task { [operationService, operation, weak self] in
-            let outcome = await operationService.runBuilderOperation(operation)
-            await MainActor.run {
-                self?.setInlineResult(in: self?.builderResultStack, title: outcome.title, value: outcome.output.isEmpty ? (outcome.succeeded ? "Succeeded" : "Failed") : outcome.output)
-            }
-        }
-    }
-
-    private func loadMachines() {
-        setInlineResult(in: machineResultStack, title: "Machines", value: "Loading container machine list...")
-        Task { [resourceService, weak self] in
-            let snapshot = await resourceService.load(kind: .machines)
             await MainActor.run {
                 guard let self else { return }
-                self.replaceInlineResults(in: self.machineResultStack, with: self.machinesResultView(snapshot))
+                self.render(snapshot)
+                if !outcome.succeeded, !outcome.detail.isEmpty {
+                    self.addFullWidth(self.commandCard(title: "Start failed", value: outcome.detail))
+                }
+                self.onRuntimeStatusChange()
             }
         }
     }
 
-    private func machinesResultView(_ snapshot: ResourceListSnapshot) -> NSView {
-        let stack = NSStackView()
-        stack.orientation = .vertical
-        stack.alignment = .width
-        stack.spacing = AppSpacing.sm
-
-        if let error = snapshot.errorMessage {
-            let detail = [error, snapshot.errorDetail].compactMap { $0 }.joined(separator: "\n")
-            stack.addArrangedSubview(monospacedValue(detail))
-            return stack
+    private func confirmAndStopSystem() {
+        let alert = NSAlert()
+        alert.messageText = "Stop Apple container runtime?"
+        alert.informativeText = "Stopping the runtime can interrupt running containers and active operations."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Stop runtime")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            return
         }
 
-        guard !snapshot.items.isEmpty else {
-            let label = NSTextField(wrappingLabelWithString: ResourceKind.machines.emptyMessage)
-            label.font = AppFonts.body
-            label.textColor = AppColors.muted
-            stack.addArrangedSubview(label)
-            return stack
-        }
+        renderRuntimeProgress(title: "Stopping runtime", message: "Stopping...")
+        Task { [systemService, weak self] in
+            let outcome = await systemService.stopSystem()
+            let snapshot = outcome.succeeded
+                ? await systemService.waitForStoppedSystemSnapshot()
+                : await systemService.loadSystemSnapshot()
 
-        for item in snapshot.items {
-            stack.addArrangedSubview(machineRow(item))
-        }
-        return stack
-    }
-
-    private func machineRow(_ item: ResourceListItem) -> NSView {
-        let row = NSStackView()
-        row.orientation = .vertical
-        row.alignment = .leading
-        row.spacing = AppSpacing.sm
-
-        row.addArrangedSubview(NSTextField.label("\(item.title) · \(item.status)", font: AppFonts.body))
-        if !item.detail.isEmpty {
-            let detail = NSTextField(wrappingLabelWithString: item.detail)
-            detail.font = AppFonts.small
-            detail.textColor = AppColors.muted
-            detail.maximumNumberOfLines = 2
-            row.addArrangedSubview(detail)
-        }
-
-        let actions = NSStackView()
-        actions.orientation = .horizontal
-        actions.alignment = .centerY
-        actions.spacing = AppSpacing.sm
-        for operation in MachineOperation.allCases {
-            let button = ClosureButton(title: operation.rawValue) { [weak self] in
-                self?.runMachine(operation, item: item)
-            }
-            button.controlSize = .small
-            button.bezelStyle = operation.isDestructive ? .rounded : .texturedRounded
-            actions.addArrangedSubview(button)
-        }
-        row.addArrangedSubview(actions)
-        return row
-    }
-
-    private func runMachine(_ operation: MachineOperation, item: ResourceListItem) {
-        if operation.isDestructive {
-            let alert = NSAlert()
-            alert.messageText = "\(operation.rawValue) \(item.title)?"
-            alert.informativeText = "This machine operation may affect the container runtime."
-            alert.alertStyle = .warning
-            alert.addButton(withTitle: operation.rawValue)
-            alert.addButton(withTitle: "Cancel")
-            guard alert.runModal() == .alertFirstButtonReturn else {
-                return
-            }
-        }
-
-        setInlineResult(in: machineResultStack, title: "Machine \(operation.rawValue)", value: "Running operation for \(item.title)...")
-        Task { [operationService, operation, item, weak self] in
-            let outcome = await operationService.runMachineOperation(operation, identifier: item.inspectIdentifier)
             await MainActor.run {
-                self?.setInlineResult(in: self?.machineResultStack, title: outcome.title, value: outcome.output.isEmpty ? (outcome.succeeded ? "Succeeded" : "Failed") : outcome.output)
+                guard let self else { return }
+                self.render(snapshot)
+                if !outcome.succeeded, !outcome.detail.isEmpty {
+                    self.addFullWidth(self.commandCard(title: "Stop failed", value: outcome.detail))
+                }
+                self.onRuntimeStatusChange()
             }
         }
     }
 
-    private func makeInlineResultStack() -> NSStackView {
-        let stack = NSStackView()
-        stack.orientation = .vertical
-        stack.alignment = .width
-        stack.spacing = AppSpacing.sm
-        return stack
+    private func confirmAndRestartSystem() {
+        let alert = NSAlert()
+        alert.messageText = "Restart Apple container runtime?"
+        alert.informativeText = "Restarting the runtime stops it first, which can interrupt running containers and active operations."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Restart runtime")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            return
+        }
+
+        renderRuntimeProgress(title: "Restarting runtime", message: "Stopping...")
+        Task { [systemService, weak self] in
+            let outcome = await systemService.restartSystem()
+            let snapshot: SystemSnapshot
+            if outcome.succeeded {
+                await MainActor.run {
+                    self?.renderRuntimeProgress(title: "Restarting runtime", message: "Waiting for ready status.")
+                }
+                snapshot = await systemService.waitForRunningSystemSnapshot()
+            } else {
+                snapshot = await systemService.loadSystemSnapshot()
+            }
+
+            await MainActor.run {
+                guard let self else { return }
+                self.render(snapshot)
+                if !outcome.succeeded, !outcome.detail.isEmpty {
+                    self.addFullWidth(self.commandCard(title: "Restart failed", value: outcome.detail))
+                }
+                self.onRuntimeStatusChange()
+            }
+        }
     }
 
-    private func setInlineResult(in resultStack: NSStackView?, title: String, value: String) {
-        replaceInlineResults(in: resultStack, with: keyValue(title, value, monospaced: true, maxLines: 12))
-    }
-
-    private func replaceInlineResults(in resultStack: NSStackView?, with view: NSView) {
-        guard let resultStack else { return }
-        resultStack.setViews([], in: .top)
-        resultStack.addArrangedSubview(view)
-    }
-
-    private func monospacedValue(_ value: String) -> NSView {
-        let label = NSTextField(wrappingLabelWithString: value)
-        label.font = AppFonts.mono
-        label.textColor = AppColors.ink
-        label.maximumNumberOfLines = 12
-        return label
+    private func renderRuntimeProgress(title: String, message: String) {
+        stack.setViews([], in: .top)
+        stack.addFullWidthArrangedSubview(PageHeaderView(title: "Runtime", subtitle: "Status and controls."))
+        addFullWidth(statusHero(title: title, message: message, health: .unknown, actions: []))
     }
 }

@@ -38,6 +38,10 @@ struct ContainerCLIClient: Sendable {
         return try await run(arguments: ["system", "start", kernelFlag, "--timeout", "\(Int(timeout))"], timeout: timeout + 5)
     }
 
+    func stopSystem(timeout: TimeInterval = 60) async throws -> CLIProcessResult {
+        try await run(arguments: ["system", "stop"], timeout: timeout)
+    }
+
     func registryLogin(registry: String, username: String, password: String) async throws -> CLIProcessResult {
         let input = Data((password + "\n").utf8)
         return try await run(

@@ -4,6 +4,12 @@ Apple Container Desktop is a native macOS AppKit utility for managing Apple's `c
 
 The MVP focuses on local `container` operations: system status, onboarding, containers, images, builds, networks, volumes, registries, machines, and settings. It does not implement Docker Engine API compatibility, a `docker` CLI compatibility layer, Kubernetes management, telemetry, or a fork of Apple's container project.
 
+## Screenshots
+
+![Containers screen with the resource list and empty state](docs/screenshots/containers.png)
+
+![Runtime status screen with service controls and status details](docs/screenshots/runtime.png)
+
 ## Requirements
 
 - Apple silicon Mac
@@ -29,7 +35,7 @@ The app uses `Process` with argument arrays to execute the resolved `container` 
 
 ## Implemented MVP scope
 
-- Runtime status: compact sidebar indicator for CLI detection, service status/version/df, service start with explicit kernel-install choice, builder controls, machine state entry, and recent operation history.
+- Runtime status: compact sidebar indicator for CLI detection, service status/version/df, and lifecycle controls.
 - Resources: searchable/sortable object lists and JSON inspect for containers, images, networks, volumes, and registries.
 - Operations: command history plus container create/run/start/stop/kill/delete/logs/stats/copy/export/Terminal exec/prune, image pull/build/push/tag/delete/prune, builder start/stop/delete/status, network and volume create/delete/prune, registry login/logout, and machine logs/stop/delete/set-default.
 - Settings: CLI executable override, detection details, service status, and read-only runtime properties.

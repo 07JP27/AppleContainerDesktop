@@ -1,6 +1,6 @@
 import AppKit
 
-final class AppShellViewController: NSViewController, NSToolbarDelegate, NSMenuItemValidation {
+final class AppShellViewController: NSViewController, NSMenuItemValidation {
     private let sidebarContainer = NSView()
     private let sidebarStack = NSStackView()
     private let runtimeStatusView = SidebarStatusView(title: "Checking runtime...", health: .unknown)
@@ -30,45 +30,6 @@ final class AppShellViewController: NSViewController, NSToolbarDelegate, NSMenuI
         buildLayout()
         select(.containers)
         refreshRuntimeStatus()
-    }
-
-    func makeToolbar() -> NSToolbar {
-        let toolbar = NSToolbar(identifier: "MainToolbar")
-        toolbar.delegate = self
-        toolbar.displayMode = .iconOnly
-        toolbar.sizeMode = .small
-        return toolbar
-    }
-
-    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.refresh, .flexibleSpace, .settings]
-    }
-
-    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.refresh, .flexibleSpace, .settings]
-    }
-
-    func toolbar(
-        _ toolbar: NSToolbar,
-        itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
-        willBeInsertedIntoToolbar flag: Bool
-    ) -> NSToolbarItem? {
-        let item = NSToolbarItem(itemIdentifier: itemIdentifier)
-        switch itemIdentifier {
-        case .refresh:
-            item.label = "Refresh"
-            item.image = NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "Refresh")
-            item.target = self
-            item.action = #selector(refresh)
-        case .settings:
-            item.label = "Settings"
-            item.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Settings")
-            item.target = self
-            item.action = #selector(showSettings)
-        default:
-            return nil
-        }
-        return item
     }
 
     private func buildLayout() {
@@ -109,9 +70,6 @@ final class AppShellViewController: NSViewController, NSToolbarDelegate, NSMenuI
         sidebarStack.translatesAutoresizingMaskIntoConstraints = false
 
         addSidebarRows([.containers, .images, .networks, .volumes, .registries])
-        sidebarStack.setCustomSpacing(AppSpacing.lg, after: sidebarStack.arrangedSubviews.last!)
-        sidebarStack.addArrangedSubview(sidebarDivider())
-        sidebarStack.setCustomSpacing(AppSpacing.lg, after: sidebarStack.arrangedSubviews.last!)
         addSidebarRows([.operations, .settings])
 
         runtimeStatusView.target = self
@@ -143,14 +101,6 @@ final class AppShellViewController: NSViewController, NSToolbarDelegate, NSMenuI
         }
     }
 
-    private func sidebarDivider() -> NSView {
-        let divider = NSBox()
-        divider.boxType = .separator
-        divider.translatesAutoresizingMaskIntoConstraints = false
-        divider.heightAnchor.constraint(equalToConstant: 1).isActive = true
-        return divider
-    }
-
     private func makeMainContainer() -> NSView {
         contentContainer.wantsLayer = true
         return contentContainer
@@ -161,7 +111,7 @@ final class AppShellViewController: NSViewController, NSToolbarDelegate, NSMenuI
         container.wantsLayer = true
 
         inspectorStack.orientation = .vertical
-        inspectorStack.alignment = .width
+        inspectorStack.alignment = .leading
         inspectorStack.spacing = AppSpacing.md
         inspectorStack.translatesAutoresizingMaskIntoConstraints = false
 
@@ -357,7 +307,7 @@ final class AppShellViewController: NSViewController, NSToolbarDelegate, NSMenuI
         case .stopped:
             "Runtime stopped"
         case .missingCLI:
-            "CLI missing"
+            "Runtime unavailable"
         case .unhealthy:
             "Runtime issue"
         case .unknown:
@@ -382,26 +332,36 @@ final class AppShellViewController: NSViewController, NSToolbarDelegate, NSMenuI
             return
         }
 
-        inspectorStack.addArrangedSubview(NSTextField.label(snapshot.title, font: AppFonts.heading))
+        let titleLabel = NSTextField.label(snapshot.title, font: AppFonts.heading)
+        titleLabel.alignment = .left
+        addInspectorView(titleLabel)
 
         if let subtitle = snapshot.subtitle, !subtitle.isEmpty {
             let label = NSTextField(wrappingLabelWithString: subtitle)
             label.font = AppFonts.body
             label.textColor = AppColors.muted
-            inspectorStack.addArrangedSubview(label)
+            label.alignment = .left
+            label.maximumNumberOfLines = 3
+            addInspectorView(label)
         }
 
         if let command = snapshot.command {
-            inspectorStack.addArrangedSubview(inspectorBlock(title: "Command", value: command.displayString, monospaced: true))
+            addInspectorView(inspectorBlock(title: "Command", value: command.displayString, monospaced: true))
         }
 
         if let detail = snapshot.detail, !detail.isEmpty {
-            inspectorStack.addArrangedSubview(inspectorBlock(title: "Detail", value: detail, monospaced: false))
+            addInspectorView(inspectorBlock(title: "Detail", value: detail, monospaced: false))
         }
 
         if let json = snapshot.json, !json.isEmpty {
-            inspectorStack.addArrangedSubview(inspectorBlock(title: "JSON", value: json, monospaced: true))
+            addInspectorView(inspectorBlock(title: "JSON", value: json, monospaced: true))
         }
+    }
+
+    private func addInspectorView(_ view: NSView) {
+        view.translatesAutoresizingMaskIntoConstraints = false
+        inspectorStack.addArrangedSubview(view)
+        view.widthAnchor.constraint(equalTo: inspectorStack.widthAnchor).isActive = true
     }
 
     private func applyShellColors() {
@@ -437,17 +397,21 @@ final class AppShellViewController: NSViewController, NSToolbarDelegate, NSMenuI
     private func inspectorBlock(title: String, value: String, monospaced: Bool) -> NSView {
         let stack = NSStackView()
         stack.orientation = .vertical
-        stack.alignment = .width
+        stack.alignment = .leading
         stack.spacing = AppSpacing.xs
 
         let titleLabel = NSTextField.label(title, font: AppFonts.small, color: AppColors.muted)
+        titleLabel.alignment = .left
         let valueLabel = NSTextField(wrappingLabelWithString: value)
         valueLabel.font = monospaced ? AppFonts.mono : AppFonts.body
         valueLabel.textColor = AppColors.ink
         valueLabel.maximumNumberOfLines = monospaced ? 120 : 12
+        valueLabel.alignment = .left
 
         stack.addArrangedSubview(titleLabel)
         stack.addArrangedSubview(valueLabel)
+        titleLabel.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        valueLabel.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         return stack
     }
 }
@@ -468,9 +432,4 @@ protocol ContainerShortcutHandling: AnyObject {
 @MainActor
 protocol ContentReloading: AnyObject {
     func reloadContent()
-}
-
-private extension NSToolbarItem.Identifier {
-    static let refresh = NSToolbarItem.Identifier("RefreshToolbarItem")
-    static let settings = NSToolbarItem.Identifier("SettingsToolbarItem")
 }

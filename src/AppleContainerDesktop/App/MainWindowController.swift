@@ -17,8 +17,6 @@ final class MainWindowController: NSWindowController {
         window.minSize = NSSize(width: 880, height: 560)
         window.level = .normal
         window.collectionBehavior = [.moveToActiveSpace, .managed]
-        window.toolbarStyle = .unifiedCompact
-        window.toolbar = shellViewController.makeToolbar()
         window.isReleasedWhenClosed = false
         window.isRestorable = false
         super.init(window: window)
