@@ -1,0 +1,104 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number (e.g. 1.0.0)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: macos-26
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag_name=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Select Xcode
+        run: |
+          ls /Applications/ | grep Xcode
+          sudo xcode-select -p
+          xcodebuild -version
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        working-directory: src
+        run: xcodegen generate
+
+      - name: Build
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          BUILD_NUMBER="${{ github.run_number }}"
+          xcodebuild -project src/AppleContainerDesktop.xcodeproj \
+            -scheme AppleContainerDesktop \
+            -configuration Release \
+            -destination 'platform=macOS' \
+            -derivedDataPath build \
+            MARKETING_VERSION="$VERSION" \
+            CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Ad-hoc codesign
+        run: |
+          APP_PATH="build/Build/Products/Release/AppleContainerDesktop.app"
+          ENTITLEMENTS="src/AppleContainerDesktop/Resources/AppleContainerDesktop.Release.entitlements"
+          codesign --force --deep --options runtime --entitlements "$ENTITLEMENTS" -s - "$APP_PATH"
+          codesign --verify --deep --strict "$APP_PATH"
+
+      - name: Create DMG
+        id: dmg
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          APP_PATH="build/Build/Products/Release/AppleContainerDesktop.app"
+          DMG_NAME="AppleContainerDesktop-v${VERSION}.dmg"
+
+          test -d "$APP_PATH" || (echo "App not found at $APP_PATH" && exit 1)
+          mkdir -p dmg-staging
+          rm -rf dmg-staging/*
+          cp -R "$APP_PATH" dmg-staging/
+          ln -s /Applications dmg-staging/Applications
+          hdiutil create -volname "Apple Container Desktop" -srcfolder dmg-staging -ov -format UDZO "$DMG_NAME"
+          echo "dmg_name=$DMG_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag_name }}
+          name: Apple Container Desktop ${{ steps.version.outputs.tag_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: ${{ steps.dmg.outputs.dmg_name }}
+          body: |
+            ## Installation
+
+            1. Download **${{ steps.dmg.outputs.dmg_name }}**.
+            2. Open the DMG and drag **AppleContainerDesktop.app** to **Applications**.
+            3. Install Apple `container` separately with Apple's GitHub Release installer package.
+            4. If macOS reports that the ad-hoc signed app cannot be verified, review this repository and run:
+               ```
+               xattr -dr com.apple.quarantine /Applications/AppleContainerDesktop.app
+               ```
+
+            Requires an Apple silicon Mac running macOS 26 or later.
