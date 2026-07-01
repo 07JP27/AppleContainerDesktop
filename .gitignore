@@ -1,0 +1,10 @@
+.DS_Store
+.env
+build/
+DerivedData/
+*.xcodeproj
+*.xcworkspace
+xcuserdata/
+*.xcuserstate
+*.dSYM
+

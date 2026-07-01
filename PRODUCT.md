@@ -14,7 +14,7 @@ CLI に慣れているユーザーも対象だが、Apple `container` の全コ�
 
 Apple Container Desktop は、Apple `container` CLI / Containerization を macOS ネイティブ GUI から管理するための実務ツールである。
 
-成功状態は、Docker Desktop の重さや広告感を持ち込まず、Apple `container` の軽量さと macOS らしい信頼感を保ったまま、Containers、Images、Builds、Networks、Volumes、Registry、System を安全に操作できること。
+成功状態は、Docker Desktop の重さや広告感を持ち込まず、Apple `container` の軽量さと macOS らしい信頼感を保ったまま、Containers、Images、Networks、Volumes、Registries、Operations、Settings に迷わずアクセスし、安全に操作できること。CLI / runtime 状態は主ナビではなく、下部の状態表示から必要時だけ確認する。
 
 ## Brand Personality
 

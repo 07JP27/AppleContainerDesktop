@@ -1,0 +1,63 @@
+name: AppleContainerDesktop
+
+options:
+  createIntermediateGroups: true
+  deploymentTarget:
+    macOS: "26.0"
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MACOSX_DEPLOYMENT_TARGET: "26.0"
+    ENABLE_USER_SCRIPT_SANDBOXING: "NO"
+
+targets:
+  AppleContainerDesktop:
+    type: application
+    platform: macOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: AppleContainerDesktop
+        excludes:
+          - Resources/**
+      - path: AppleContainerDesktop/Resources/AppIcon.xcassets
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.jp27.AppleContainerDesktop
+        PRODUCT_NAME: AppleContainerDesktop
+        INFOPLIST_FILE: AppleContainerDesktop/Resources/Info.plist
+        CURRENT_PROJECT_VERSION: "1"
+        MARKETING_VERSION: "0.1.0"
+        GENERATE_INFOPLIST_FILE: "NO"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_HARDENED_RUNTIME: "YES"
+        CODE_SIGN_STYLE: Automatic
+      configs:
+        Release:
+          CODE_SIGN_ENTITLEMENTS: AppleContainerDesktop/Resources/AppleContainerDesktop.Release.entitlements
+
+  AppleContainerDesktopTests:
+    type: bundle.unit-test
+    platform: macOS
+    deploymentTarget: "26.0"
+    sources:
+      - path: AppleContainerDesktopTests
+    dependencies:
+      - target: AppleContainerDesktop
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.jp27.AppleContainerDesktopTests
+        GENERATE_INFOPLIST_FILE: "YES"
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/AppleContainerDesktop.app/Contents/MacOS/AppleContainerDesktop"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+
+schemes:
+  AppleContainerDesktop:
+    build:
+      targets:
+        AppleContainerDesktop: all
+        AppleContainerDesktopTests: [test]
+    test:
+      targets:
+        - AppleContainerDesktopTests

@@ -25,7 +25,7 @@ Apple Container Desktop は、Apple が公開している `container` CLI / Cont
 - Apple silicon Mac
 - macOS 26+
 - Xcode 26+ / Swift 6 toolchain
-- Apple `container` CLI は macOS 標準搭載ではないため、Homebrew または Apple の GitHub Release installer package で別途インストール済み、または初回起動時にインストール導線を提示できること
+- Apple `container` CLI は macOS 標準搭載ではないため、Apple の GitHub Release signed installer package で別途インストール済み、または初回起動時にインストール導線を提示できること
 
 ### 開発時
 
@@ -39,7 +39,7 @@ Apple Container Desktop は、Apple が公開している `container` CLI / Cont
 
 MVP は Docker Engine の完全互換実装ではなく、Apple `container` CLI のデスクトップ管理アプリとして定義する。
 
-ただし、情報設計と用語は Docker Desktop 利用者が理解しやすいように寄せる。たとえば、Containers、Images、Volumes、Networks、Registry、Builds、System という主要ナビゲーションを持つ。
+ただし、情報設計と用語は Docker Desktop 利用者が理解しやすいように寄せる。主要ナビゲーションは Containers、Images、Networks、Volumes、Registries、Operations、Settings とし、CLI / runtime 状態は sidebar 下部の compact status indicator として扱う。Build は Images の action、Machines は runtime control state として扱う。
 
 ### 非目標
 
@@ -67,14 +67,12 @@ MVP は Docker Engine の完全互換実装ではなく、Apple `container` CLI 
 - `container` CLI は以下の順で検出する。
   - ユーザーが Settings で指定した executable path
   - `PATH` 上の `container`
-  - Homebrew Apple silicon 標準パス: `/opt/homebrew/bin/container`
-  - Homebrew Intel / Rosetta 標準パス: `/usr/local/bin/container`
-  - GitHub Release installer package の既定インストール先
+  - GitHub Release installer package の既定インストール先: `/usr/local/bin/container`
+  - Apple platform install location: `/Library/Apple/usr/bin/container`
 - `container system status --format json` と `container system version --format json` を使い、CLI と system service の状態を表示する。
-- `container` が未インストールの場合、Homebrew と GitHub Release installer package の導線を表示する。
-  - Homebrew が検出できる場合は `brew install container` をコピー / Terminal で開く / アプリ内 operation として実行する選択肢を提示する。
-  - Homebrew が検出できない場合は Homebrew のインストール案内と、GitHub Release installer package への外部リンクを提示する。
-  - アプリがユーザー承認なしに Homebrew install を自動実行してはならない。
+- `container` が未インストールの場合、GitHub Release signed installer package への外部リンクを表示する。
+  - アプリは `container` CLI を同梱せず、自動インストールもしない。
+  - Homebrew formula を案内しない。誤った `container` パッケージをインストールするリスクを避ける。
 - system service が停止中の場合、`container system start` を実行するボタンを表示する。
 - 初回起動時に、ローカル専用・テレメトリなし・管理者権限が必要な操作の扱いを説明する。
 
@@ -169,12 +167,15 @@ UI は Docker Desktop の代替品ではなく、Apple `container` CLI を扱う
 ### 7.2 画面構成
 
 - 基本 layout は 3 pane 構成にする。
-  - Sidebar: Dashboard、Containers、Images、Builds、Networks、Volumes、Registry、Machines、Settings
-  - Main: table、list、form、dashboard、settings
+  - Sidebar: Containers、Images、Networks、Volumes、Registries、Operations、Settings と下部 runtime status indicator
+  - Main: table、list、form、runtime control、settings
   - Inspector: 選択項目の metadata、JSON inspect、logs、actions
-- Dashboard は system service 状態、CLI / API server version、disk usage、recent operations を最上位に置く。
-- `container` CLI が未検出の場合は、Dashboard の代わりに install required state を表示し、Homebrew install を第一候補、GitHub Release installer package を第二候補として案内する。
-- Containers / Images / Networks / Volumes / Registry / Machines は table-first UI にする。
+- Runtime detail は主ナビではなく、下部 status indicator から開く。CLI / API server version、disk usage、builder controls、machine entry、recent operations を扱う。
+- Runtime detail は View > Runtime Status (`⌘0`) からも開ける。runtime は主ナビではないが、service start が必要な場合に keyboard / VoiceOver で到達可能にする。
+- Build は top-level object collection ではなく Images の action として扱う。
+- Machines は top-level collection ではなく runtime control state として扱う。
+- `container` CLI が未検出の場合は、初期画面の Containers に concise install-required state を表示し、GitHub Release signed installer package を案内する。長い runtime 説明を初期画面に出さない。
+- Containers / Images / Networks / Volumes / Registries は table-first UI にする。
 - Logs、build progress、pull / push progress は terminal-like panel として表示するが、app chrome は macOS native に保つ。
 
 ### 7.3 視覚システム
@@ -193,7 +194,7 @@ UI は Docker Desktop の代替品ではなく、Apple `container` CLI を扱う
 - Status chip は色だけでなく、label と icon / shape で running、stopped、unhealthy、building、failed を伝える。
 - 長時間 operation は progress、command preview、elapsed time、stdout / stderr 展開、cancel、final result を持つ operation row として表示する。
 - Create / Run / Build form は progressive disclosure を使い、基本項目と advanced CLI option を分ける。
-- Empty state は次の行動を提示する。例: Containers が空なら Run Container、Pull Image、System Status への導線を出す。
+- Empty state は次の行動を提示する。例: Containers が空なら Run Container、Pull Image への導線を出す。
 - Error state は human summary、stderr、exit code、実行 command、次の対処を表示する。
 
 ### 7.5 Interaction / Motion
@@ -363,7 +364,7 @@ Release note には以下を含める。
 - インストール手順
 - Applications への drag and drop
 - ad-hoc 署名の場合の quarantine 解除手順
-- Apple `container` CLI は同梱せず、Homebrew の `brew install container` または GitHub Release installer package で別途インストールが必要であること
+- Apple `container` CLI は同梱せず、Apple の GitHub Release installer package で別途インストールが必要であること
 - 対応 macOS / Apple silicon 要件
 
 ## 14. 公証仕様
@@ -399,7 +400,7 @@ APPLE_APP_PASSWORD=
 ### Integration tests
 
 - fake `container` executable を使った CLI Bridge tests
-- fake `brew` executable を使った Homebrew install guidance / operation tests
+- missing-CLI install guidance の tests
 - macOS 26 + Apple silicon + `container` installed 環境での opt-in tests
 - system status / image list / container list の read-only smoke tests
 
@@ -419,12 +420,12 @@ SkimDown の `launch-smoke-test.sh` と同様に、Release / Debug app を起動
 - CLI Bridge
 - Onboarding and system status
 
-### Phase 2: Read-only dashboard
+### Phase 2: Read-only System and collections
 
-- Dashboard
+- System
 - Containers list / inspect
 - Images list / inspect
-- Networks / Volumes / Registry read-only views
+- Networks / Volumes / Registries read-only views
 - loading / empty / error states
 
 ### Phase 3: Container operations
@@ -448,7 +449,6 @@ SkimDown の `launch-smoke-test.sh` と同様に、Release / Debug app を起動
 
 ## 17. 未決事項
 
-- Homebrew install をアプリ内 operation として実行するか、Terminal 起動 / command copy の導線に留めるか。
 - Apple `container` installer package をアプリ内から直接ダウンロードするか、外部リンクに留めるか。
 - Bundle ID と正式アプリ名。
 - sandbox を有効化するか。

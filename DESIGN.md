@@ -61,27 +61,30 @@ Canonical color values are specified in OKLCH. Swift 実装ではこの設計値
 
 The app uses a three-zone macOS layout.
 
-1. Sidebar: Dashboard, Containers, Images, Builds, Networks, Volumes, Registry, Machines, Settings.
-2. Primary content: list, table, build form, or settings surface.
+1. Sidebar: Containers, Images, Networks, Volumes, Registries, Operations, Settings, plus a compact runtime status indicator at the bottom.
+2. Primary content: object table, build form, operation history, settings surface, or runtime detail when opened from the status indicator.
 3. Detail / inspector: selected item summary, JSON inspect, logs, actions, metadata.
 
-Toolbar actions are contextual. Global actions include refresh, command history, system status, and settings. Destructive actions never sit as the primary toolbar action.
+Toolbar actions are contextual. Global actions include refresh and settings. Destructive actions never sit as the primary toolbar action.
 
 ## Navigation
 
-- Dashboard shows system status, disk usage, recent operations, and service health.
-- If `container` is missing, the first-run surface becomes an install-required state with Homebrew as the primary path and GitHub Release installer package as the fallback path.
+- Runtime is not a primary navigation item. It is a compact bottom status indicator; opening it shows CLI availability, service health, versions, disk usage, builder controls, machine entry, and recent operations.
+- Runtime remains keyboard-accessible from View > Runtime Status (`⌘0`) because it can contain required service-start controls.
+- The default surface is Containers. If `container` is missing, resource lists show a concise install-required state with Apple's signed GitHub Release installer package as the primary path.
 - Containers uses a table-first layout with a persistent detail inspector.
 - Images uses table + tag / digest metadata + pull / push / build operations.
-- Builds uses a guided form with command preview and streamed progress output.
+- Build image is an Images action with command preview and streamed progress output, not a top-level collection.
+- Machines are runtime control state, not a primary object collection.
+- Operations exposes command history and execution results.
 - Logs and exec use a terminal-like panel but keep app chrome native.
-- Settings groups system properties, CLI path, service control, resource defaults, and accessibility preferences.
+- Settings groups runtime properties, CLI path, service control, resource defaults, and accessibility preferences.
 
 ## Component System
 
 ### Tables
 
-Tables are the default for containers, images, networks, volumes, registries, and machines. Each table supports search, filter chips, sortable columns, keyboard row navigation, and empty states.
+Tables are the default for containers, images, networks, volumes, and registries. Each table supports search, filter chips, sortable columns, keyboard row navigation, and empty states.
 
 ### Status chips
 
@@ -99,7 +102,7 @@ Create / run / build forms use progressive disclosure. Common fields are visible
 
 Empty states teach the next action. For example, an empty Containers screen should offer Run Container, Pull Image, and View system status instead of only saying there are no containers.
 
-The missing-CLI empty state is not an error wall. It should explain that Apple `container` is not bundled with macOS, show the detected Homebrew status, offer `brew install container` as a copyable command, and provide a fallback link to the GitHub Release installer package.
+The missing-CLI empty state is not an error wall. It should explain that Apple `container` is not bundled with the app, point to Apple's signed GitHub Release installer package, show the expected detected paths, and make clear that the app never installs packages automatically.
 
 ### Errors
 
