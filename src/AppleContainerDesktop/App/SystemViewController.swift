@@ -68,6 +68,10 @@ final class SystemViewController: NSViewController, ContentReloading {
         }
     }
 
+    func applySystemSnapshot(_ snapshot: SystemSnapshot) {
+        render(snapshot)
+    }
+
     private func renderLoading() {
         stack.setViews([], in: .top)
         stack.addFullWidthArrangedSubview(PageHeaderView(title: "Runtime", subtitle: "Checking status."))

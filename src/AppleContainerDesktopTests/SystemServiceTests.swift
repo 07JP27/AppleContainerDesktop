@@ -2,6 +2,16 @@ import XCTest
 @testable import AppleContainerDesktop
 
 final class SystemServiceTests: XCTestCase {
+    func testLoadRuntimeHealthOnlyRunsStatusCommand() async {
+        let runner = SequencedStatusRunner(statusExitCodes: [0])
+        let service = makeSystemService(runner: runner)
+
+        let health = await service.loadRuntimeHealth()
+
+        XCTAssertEqual(health, .running)
+        XCTAssertEqual(runner.commands.map(\.arguments), [["system", "status", "--format", "json"]])
+    }
+
     func testWaitForRunningSystemSnapshotPollsUntilRuntimeIsRunning() async {
         let runner = SequencedStatusRunner(statusExitCodes: [1, 0])
         let service = makeSystemService(runner: runner)

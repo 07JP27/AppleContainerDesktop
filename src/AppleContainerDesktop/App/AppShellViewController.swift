@@ -309,10 +309,22 @@ final class AppShellViewController: NSViewController, NSMenuItemValidation {
         runtimeStatusRefreshTask = Task { [systemService, weak self] in
             while true {
                 guard !Task.isCancelled else { return }
-                let snapshot = await systemService.loadSystemSnapshot()
-                guard !Task.isCancelled else { return }
-                await MainActor.run {
-                    self?.updateRuntimeStatus(snapshot)
+                let isSystemSelected = await MainActor.run {
+                    self?.selectedItem == .system
+                }
+                if isSystemSelected {
+                    let snapshot = await systemService.loadSystemSnapshot()
+                    guard !Task.isCancelled else { return }
+                    await MainActor.run {
+                        self?.updateRuntimeStatus(snapshot)
+                        self?.cachedSystemViewController?.applySystemSnapshot(snapshot)
+                    }
+                } else {
+                    let health = await systemService.loadRuntimeHealth()
+                    guard !Task.isCancelled else { return }
+                    await MainActor.run {
+                        self?.updateRuntimeStatus(health)
+                    }
                 }
                 do {
                     try await Task.sleep(for: .seconds(5))
@@ -324,11 +336,19 @@ final class AppShellViewController: NSViewController, NSMenuItemValidation {
     }
 
     private func updateRuntimeStatus(_ snapshot: SystemSnapshot) {
-        runtimeStatusView.update(title: runtimeStatusTitle(for: snapshot), health: snapshot.health)
+        updateRuntimeStatus(snapshot.health)
     }
 
-    private func runtimeStatusTitle(for snapshot: SystemSnapshot) -> String {
-        switch snapshot.health {
+    private func updateRuntimeStatus(_ health: ServiceHealth) {
+        runtimeStatusView.update(title: runtimeStatusTitle(for: health), health: health)
+    }
+
+    private var cachedSystemViewController: SystemViewController? {
+        cachedContentViewControllers[.system] as? SystemViewController
+    }
+
+    private func runtimeStatusTitle(for health: ServiceHealth) -> String {
+        switch health {
         case .running:
             "Runtime ready"
         case .stopped:

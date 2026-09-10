@@ -72,6 +72,45 @@ final class LayoutSmokeTests: XCTestCase {
         await fulfillment(of: [statusReported], timeout: 1)
     }
 
+    func testRuntimeAppliesPolledSystemSnapshot() async throws {
+        let statusReported = expectation(description: "Runtime status reported")
+        let controller = SystemViewController(
+            systemService: SystemService(
+                preferences: LayoutPreferences(),
+                resolver: ContainerCLIResolver(
+                    fileSystem: LayoutFileSystem(executablePaths: ["/fake/container"]),
+                    environment: CLIResolverEnvironment(path: nil),
+                    knownPaths: ["/fake/container"]
+                ),
+                runner: LayoutRunner(stdout: "[]")
+            ),
+            onRuntimeStatusChange: { _ in
+                statusReported.fulfill()
+            }
+        )
+        controller.loadViewIfNeeded()
+        await fulfillment(of: [statusReported], timeout: 1)
+
+        controller.applySystemSnapshot(
+            SystemSnapshot(
+                detection: CLIDetectionResult(
+                    executableURL: URL(fileURLWithPath: "/fake/container"),
+                    source: .knownLocation,
+                    problem: nil
+                ),
+                health: .stopped,
+                version: nil,
+                statusJSON: nil,
+                diskUsageJSON: nil,
+                message: "System service appears to be stopped or unreachable.",
+                lastCommand: nil,
+                errorDetail: nil
+            )
+        )
+
+        XCTAssertNotNil(controller.view.firstTextField(with: "Container runtime is stopped"))
+    }
+
     private func resourceController(_ kind: ResourceKind) -> ResourceListViewController {
         ResourceListViewController(
             kind: kind,
