@@ -307,7 +307,7 @@ final class AppShellViewController: NSViewController, NSMenuItemValidation {
 
     private func startRuntimeStatusRefreshing() {
         runtimeStatusRefreshTask = Task { [systemService, weak self] in
-            while !Task.isCancelled {
+            while true {
                 let snapshot = await systemService.loadSystemSnapshot()
                 guard !Task.isCancelled else { return }
                 await MainActor.run {
