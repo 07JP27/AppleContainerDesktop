@@ -2,13 +2,13 @@ import AppKit
 
 final class SystemViewController: NSViewController, ContentReloading {
     private let systemService: SystemService
-    private let onRuntimeStatusChange: @MainActor () -> Void
+    private let onRuntimeStatusChange: @MainActor (SystemSnapshot) -> Void
     private let scrollView = NSScrollView()
     private let stack = NSStackView()
 
     init(
         systemService: SystemService = SystemService(),
-        onRuntimeStatusChange: @escaping @MainActor () -> Void = {}
+        onRuntimeStatusChange: @escaping @MainActor (SystemSnapshot) -> Void = { _ in }
     ) {
         self.systemService = systemService
         self.onRuntimeStatusChange = onRuntimeStatusChange
@@ -63,6 +63,7 @@ final class SystemViewController: NSViewController, ContentReloading {
             let snapshot = await systemService.loadSystemSnapshot()
             await MainActor.run {
                 self.render(snapshot)
+                self.onRuntimeStatusChange(snapshot)
             }
         }
     }
@@ -350,7 +351,7 @@ final class SystemViewController: NSViewController, ContentReloading {
                 if !outcome.succeeded, !outcome.detail.isEmpty {
                     self.addFullWidth(self.commandCard(title: "Start failed", value: outcome.detail))
                 }
-                self.onRuntimeStatusChange()
+                self.onRuntimeStatusChange(snapshot)
             }
         }
     }
@@ -379,7 +380,7 @@ final class SystemViewController: NSViewController, ContentReloading {
                 if !outcome.succeeded, !outcome.detail.isEmpty {
                     self.addFullWidth(self.commandCard(title: "Stop failed", value: outcome.detail))
                 }
-                self.onRuntimeStatusChange()
+                self.onRuntimeStatusChange(snapshot)
             }
         }
     }
@@ -414,7 +415,7 @@ final class SystemViewController: NSViewController, ContentReloading {
                 if !outcome.succeeded, !outcome.detail.isEmpty {
                     self.addFullWidth(self.commandCard(title: "Restart failed", value: outcome.detail))
                 }
-                self.onRuntimeStatusChange()
+                self.onRuntimeStatusChange(snapshot)
             }
         }
     }

@@ -15,6 +15,11 @@ final class AppShellViewController: NSViewController, NSMenuItemValidation {
     private var sidebarRows: [SidebarItem: SidebarRowView] = [:]
     private var currentContentViewController: NSViewController?
     private var cachedContentViewControllers: [SidebarItem: NSViewController] = [:]
+    private var runtimeStatusRefreshTask: Task<Void, Never>?
+
+    deinit {
+        runtimeStatusRefreshTask?.cancel()
+    }
 
     override func loadView() {
         let rootView = ThemedContainerView(backgroundColor: AppColors.background)
@@ -29,7 +34,7 @@ final class AppShellViewController: NSViewController, NSMenuItemValidation {
         super.viewDidLoad()
         buildLayout()
         select(.containers)
-        refreshRuntimeStatus()
+        startRuntimeStatusRefreshing()
     }
 
     private func buildLayout() {
@@ -167,8 +172,8 @@ final class AppShellViewController: NSViewController, NSMenuItemValidation {
         let nextViewController: NSViewController
         if item == .system {
             nextViewController = SystemViewController(
-                onRuntimeStatusChange: { [weak self] in
-                    self?.refreshRuntimeStatus()
+                onRuntimeStatusChange: { [weak self] snapshot in
+                    self?.updateRuntimeStatus(snapshot)
                 }
             )
             updateInspector(.empty)
@@ -295,9 +300,30 @@ final class AppShellViewController: NSViewController, NSMenuItemValidation {
         Task { [systemService, weak self] in
             let snapshot = await systemService.loadSystemSnapshot()
             await MainActor.run {
-                self?.runtimeStatusView.update(title: self?.runtimeStatusTitle(for: snapshot) ?? snapshot.health.label, health: snapshot.health)
+                self?.updateRuntimeStatus(snapshot)
             }
         }
+    }
+
+    private func startRuntimeStatusRefreshing() {
+        runtimeStatusRefreshTask = Task { [systemService, weak self] in
+            while !Task.isCancelled {
+                let snapshot = await systemService.loadSystemSnapshot()
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    self?.updateRuntimeStatus(snapshot)
+                }
+                do {
+                    try await Task.sleep(for: .seconds(5))
+                } catch {
+                    return
+                }
+            }
+        }
+    }
+
+    private func updateRuntimeStatus(_ snapshot: SystemSnapshot) {
+        runtimeStatusView.update(title: runtimeStatusTitle(for: snapshot), health: snapshot.health)
     }
 
     private func runtimeStatusTitle(for snapshot: SystemSnapshot) -> String {

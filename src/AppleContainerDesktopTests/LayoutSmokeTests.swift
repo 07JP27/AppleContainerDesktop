@@ -49,6 +49,29 @@ final class LayoutSmokeTests: XCTestCase {
         }
     }
 
+    func testRuntimeReloadReportsRenderedStatus() async {
+        let statusReported = expectation(description: "Runtime status reported")
+        let controller = SystemViewController(
+            systemService: SystemService(
+                preferences: LayoutPreferences(),
+                resolver: ContainerCLIResolver(
+                    fileSystem: LayoutFileSystem(executablePaths: ["/fake/container"]),
+                    environment: CLIResolverEnvironment(path: nil),
+                    knownPaths: ["/fake/container"]
+                ),
+                runner: LayoutRunner(stdout: "[]")
+            ),
+            onRuntimeStatusChange: { snapshot in
+                XCTAssertEqual(snapshot.health, .unknown)
+                statusReported.fulfill()
+            }
+        )
+
+        controller.loadViewIfNeeded()
+
+        await fulfillment(of: [statusReported], timeout: 1)
+    }
+
     private func resourceController(_ kind: ResourceKind) -> ResourceListViewController {
         ResourceListViewController(
             kind: kind,
