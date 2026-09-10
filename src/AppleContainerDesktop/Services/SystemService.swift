@@ -64,6 +64,28 @@ struct SystemService: Sendable {
         }
     }
 
+    func loadRuntimeHealth() async -> ServiceHealth {
+        let detection = resolver.resolve(overridePath: preferences.cliExecutablePath)
+        guard let executableURL = detection.executableURL else {
+            return .missingCLI
+        }
+
+        let client = ContainerCLIClient(executableURL: executableURL, runner: runner)
+        do {
+            _ = try await client.systemStatusJSON()
+            return .running
+        } catch let error as CLIClientError {
+            switch error {
+            case .processFailed:
+                return .stopped
+            case .decodingFailed:
+                return .unhealthy
+            }
+        } catch {
+            return .unhealthy
+        }
+    }
+
     func loadSettingsSnapshot() async -> SettingsSnapshot {
         let detection = resolver.resolve(overridePath: preferences.cliExecutablePath)
         guard let executableURL = detection.executableURL else {

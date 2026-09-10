@@ -15,6 +15,11 @@ final class AppShellViewController: NSViewController, NSMenuItemValidation {
     private var sidebarRows: [SidebarItem: SidebarRowView] = [:]
     private var currentContentViewController: NSViewController?
     private var cachedContentViewControllers: [SidebarItem: NSViewController] = [:]
+    private var runtimeStatusRefreshTask: Task<Void, Never>?
+
+    deinit {
+        runtimeStatusRefreshTask?.cancel()
+    }
 
     override func loadView() {
         let rootView = ThemedContainerView(backgroundColor: AppColors.background)
@@ -29,7 +34,7 @@ final class AppShellViewController: NSViewController, NSMenuItemValidation {
         super.viewDidLoad()
         buildLayout()
         select(.containers)
-        refreshRuntimeStatus()
+        startRuntimeStatusRefreshing()
     }
 
     private func buildLayout() {
@@ -167,8 +172,8 @@ final class AppShellViewController: NSViewController, NSMenuItemValidation {
         let nextViewController: NSViewController
         if item == .system {
             nextViewController = SystemViewController(
-                onRuntimeStatusChange: { [weak self] in
-                    self?.refreshRuntimeStatus()
+                onRuntimeStatusChange: { [weak self] snapshot in
+                    self?.updateRuntimeStatus(snapshot)
                 }
             )
             updateInspector(.empty)
@@ -295,13 +300,55 @@ final class AppShellViewController: NSViewController, NSMenuItemValidation {
         Task { [systemService, weak self] in
             let snapshot = await systemService.loadSystemSnapshot()
             await MainActor.run {
-                self?.runtimeStatusView.update(title: self?.runtimeStatusTitle(for: snapshot) ?? snapshot.health.label, health: snapshot.health)
+                self?.updateRuntimeStatus(snapshot)
             }
         }
     }
 
-    private func runtimeStatusTitle(for snapshot: SystemSnapshot) -> String {
-        switch snapshot.health {
+    private func startRuntimeStatusRefreshing() {
+        runtimeStatusRefreshTask = Task { [systemService, weak self] in
+            while true {
+                guard !Task.isCancelled else { return }
+                let isSystemSelected = await MainActor.run {
+                    self?.selectedItem == .system
+                }
+                if isSystemSelected {
+                    let snapshot = await systemService.loadSystemSnapshot()
+                    guard !Task.isCancelled else { return }
+                    await MainActor.run {
+                        self?.updateRuntimeStatus(snapshot)
+                        self?.cachedSystemViewController?.applySystemSnapshot(snapshot)
+                    }
+                } else {
+                    let health = await systemService.loadRuntimeHealth()
+                    guard !Task.isCancelled else { return }
+                    await MainActor.run {
+                        self?.updateRuntimeStatus(health)
+                    }
+                }
+                do {
+                    try await Task.sleep(for: .seconds(5))
+                } catch {
+                    return
+                }
+            }
+        }
+    }
+
+    private func updateRuntimeStatus(_ snapshot: SystemSnapshot) {
+        updateRuntimeStatus(snapshot.health)
+    }
+
+    private func updateRuntimeStatus(_ health: ServiceHealth) {
+        runtimeStatusView.update(title: runtimeStatusTitle(for: health), health: health)
+    }
+
+    private var cachedSystemViewController: SystemViewController? {
+        cachedContentViewControllers[.system] as? SystemViewController
+    }
+
+    private func runtimeStatusTitle(for health: ServiceHealth) -> String {
+        switch health {
         case .running:
             "Runtime ready"
         case .stopped:
