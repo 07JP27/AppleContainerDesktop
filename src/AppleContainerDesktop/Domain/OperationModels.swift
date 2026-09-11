@@ -51,60 +51,152 @@ enum ContainerOperation: String, CaseIterable, Sendable {
     }
 }
 
-struct ContainerCreateRunRequest: Equatable, Sendable {
-    var operation: ContainerOperation
-    var image: String
+struct ContainerBatchTarget: Equatable, Sendable, Identifiable {
+    var id: String
     var name: String
-    var detach: Bool
-    var remove: Bool
-    var cpus: String
-    var memory: String
-    var environment: String
-    var volumes: String
-    var ports: String
-    var networks: String
-    var platform: String
-    var command: String
+    var state: String
+}
 
-    var arguments: [String] {
-        var result = [operation == .run ? "run" : "create"]
-        if operation == .run, detach {
-            result.append("--detach")
-        }
-        if operation == .run, remove {
-            result.append("--rm")
-        }
-        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedName.isEmpty {
-            result += ["--name", trimmedName]
-        }
-        appendFlag("--cpus", value: cpus, to: &result)
-        appendFlag("--memory", value: memory, to: &result)
-        appendLines(environment, flag: "--env", to: &result)
-        appendLines(volumes, flag: "--volume", to: &result)
-        appendLines(ports, flag: "--publish", to: &result)
-        appendLines(networks, flag: "--network", to: &result)
-        appendFlag("--platform", value: platform, to: &result)
-        result.append(image.trimmingCharacters(in: .whitespacesAndNewlines))
-        result += CommandLineSplitter.split(command)
-        return result
-    }
+struct ContainerBatchRequest: Equatable, Sendable {
+    var operation: ContainerOperation
+    var targets: [ContainerBatchTarget]
+    var forceDelete: Bool = false
 
-    private func appendFlag(_ flag: String, value: String, to result: inout [String]) {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmed.isEmpty {
-            result += [flag, trimmed]
+    func validate() throws(ContainerBatchValidationError) {
+        switch operation {
+        case .start, .stop, .delete:
+            break
+        case .create, .run, .kill, .logs, .stats, .copy, .export, .exec, .prune:
+            throw .unsupportedOperation(operation)
         }
-    }
 
-    private func appendLines(_ value: String, flag: String, to result: inout [String]) {
-        for line in value.components(separatedBy: CharacterSet.newlines.union(CharacterSet(charactersIn: ","))) {
-            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty {
-                result += [flag, trimmed]
+        guard !forceDelete || operation == .delete else {
+            throw .forceDeleteRequiresDelete
+        }
+        guard !targets.isEmpty else {
+            throw .emptyTargets
+        }
+
+        var identifiers = Set<String>()
+        for (index, target) in targets.enumerated() {
+            guard !target.id.isEmpty else {
+                throw .emptyIdentifier(index: index)
+            }
+            guard !target.id.unicodeScalars.contains(where: {
+                CharacterSet.whitespacesAndNewlines.contains($0) || CharacterSet.controlCharacters.contains($0)
+            }) else {
+                throw .identifierContainsWhitespaceOrControl(index: index)
+            }
+            guard !target.id.hasPrefix("-") else {
+                throw .optionLikeIdentifier(index: index)
+            }
+            guard identifiers.insert(target.id).inserted else {
+                throw .duplicateIdentifier(target.id)
             }
         }
     }
+}
+
+enum ContainerBatchValidationError: Error, LocalizedError, Equatable, Sendable {
+    case unsupportedOperation(ContainerOperation)
+    case emptyTargets
+    case forceDeleteRequiresDelete
+    case emptyIdentifier(index: Int)
+    case identifierContainsWhitespaceOrControl(index: Int)
+    case optionLikeIdentifier(index: Int)
+    case duplicateIdentifier(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .unsupportedOperation:
+            "Batch container operations support only Start, Stop, or Delete."
+        case .emptyTargets:
+            "Select at least one container."
+        case .forceDeleteRequiresDelete:
+            "Force delete can be used only with Delete."
+        case .emptyIdentifier(let index):
+            "Container ID \(index + 1) cannot be empty."
+        case .identifierContainsWhitespaceOrControl(let index):
+            "Container ID \(index + 1) cannot contain whitespace or control characters."
+        case .optionLikeIdentifier(let index):
+            "Container ID \(index + 1) cannot begin with a hyphen."
+        case .duplicateIdentifier(let identifier):
+            "Container ID \(identifier) appears more than once."
+        }
+    }
+}
+
+struct ContainerBatchItemResult: Equatable, Sendable, Identifiable {
+    var target: ContainerBatchTarget
+    var command: CLICommandPreview?
+    var result: CLIProcessResult?
+    var errorMessage: String?
+
+    var id: String {
+        target.id
+    }
+
+    var succeeded: Bool {
+        result?.succeeded == true && errorMessage == nil
+    }
+
+    var success: Bool {
+        succeeded
+    }
+
+    var output: String {
+        if let errorMessage {
+            return errorMessage
+        }
+        guard let result else {
+            return ""
+        }
+        let runtimeOutput = [result.stdout, result.stderr]
+            .filter { !$0.isEmpty }
+            .joined(separator: result.stdout.isEmpty || result.stderr.isEmpty ? "" : "\n")
+        if !runtimeOutput.isEmpty {
+            return runtimeOutput
+        }
+        return result.succeeded ? "" : "Command failed with exit code \(result.exitCode)."
+    }
+}
+
+struct ContainerBatchOutcome: Equatable, Sendable {
+    var operation: ContainerOperation
+    var targets: [ContainerBatchTarget]
+    var itemResults: [ContainerBatchItemResult]
+    var commands: [CLICommandPreview]
+    var batchResult: CLIProcessResult?
+    var succeededIDs: [String]
+    var failedIDs: [String]
+    var errorMessage: String?
+    var output: String
+
+    var executedCommands: [CLICommandPreview] {
+        commands
+    }
+
+    var succeeded: Bool {
+        guard errorMessage == nil, !targets.isEmpty, failedIDs.isEmpty else {
+            return false
+        }
+        return succeededIDs == targets.map(\.id)
+    }
+}
+
+struct ContainerCreateRunRequest: Equatable, Sendable {
+    var operation: ContainerOperation
+    var image: String = ""
+    var name: String = ""
+    var remove: Bool = false
+    var cpus: String = ""
+    var memory: String = ""
+    var environment: [ContainerEnvironmentInput] = []
+    var volumes: [ContainerMountInput] = []
+    var ports: [ContainerPortInput] = []
+    var networks: [ContainerNetworkInput] = []
+    var platform: String = ""
+    var command: String = ""
 }
 
 struct ContainerCopyRequest: Equatable, Sendable {
@@ -139,20 +231,63 @@ struct ContainerExecRequest: Equatable, Sendable {
 }
 
 enum CommandLineSplitter {
+    enum TokenizationError: Error, LocalizedError, Equatable, Sendable {
+        case unmatchedQuote
+        case trailingEscape
+        case nullCharacter
+
+        var errorDescription: String? {
+            switch self {
+            case .unmatchedQuote:
+                "Close the unmatched quote in the command."
+            case .trailingEscape:
+                "Complete or remove the trailing backslash in the command."
+            case .nullCharacter:
+                "The command cannot contain a null character."
+            }
+        }
+    }
+
     static func split(_ command: String) -> [String] {
+        tokenize(command, strict: false).arguments
+    }
+
+    static func validatedSplit(_ command: String) throws(TokenizationError) -> [String] {
+        guard !command.utf8.contains(0) else {
+            throw TokenizationError.nullCharacter
+        }
+        let result = tokenize(command, strict: true)
+        if let error = result.error {
+            throw error
+        }
+        return result.arguments
+    }
+
+    private static func tokenize(_ command: String, strict: Bool) -> (arguments: [String], error: TokenizationError?) {
         var result: [String] = []
         var current = ""
         var quote: Character?
         var escaping = false
+        var tokenStarted = false
+        let characters = strict ? command.unicodeScalars.map { Character(String($0)) } : Array(command)
 
-        for character in command {
+        for character in characters {
             if escaping {
+                if strict, character == "\n" {
+                    escaping = false
+                    continue
+                }
+                if strict, quote == "\"", !"$`\"\\".contains(character) {
+                    current.append("\\")
+                }
                 current.append(character)
+                tokenStarted = true
                 escaping = false
                 continue
             }
 
-            if character == "\\" {
+            // Exec keeps its existing permissive escaping; launch validation honors literal single quotes.
+            if character == "\\", !strict || quote != "'" {
                 escaping = true
                 continue
             }
@@ -168,24 +303,33 @@ enum CommandLineSplitter {
 
             if character == "\"" || character == "'" {
                 quote = character
+                tokenStarted = true
                 continue
             }
 
             if character.isWhitespace {
-                if !current.isEmpty {
+                if !current.isEmpty || (strict && tokenStarted) {
                     result.append(current)
                     current = ""
                 }
+                tokenStarted = false
                 continue
             }
 
             current.append(character)
+            tokenStarted = true
         }
 
-        if !current.isEmpty {
+        if !current.isEmpty || (strict && tokenStarted) {
             result.append(current)
         }
-        return result
+        if strict, escaping {
+            return (result, .trailingEscape)
+        }
+        if strict, quote != nil {
+            return (result, .unmatchedQuote)
+        }
+        return (result, nil)
     }
 }
 

@@ -6,13 +6,24 @@ struct InspectorSnapshot: Sendable {
     var command: CLICommandPreview?
     var detail: String?
     var json: String?
+    var overview: ResourceOverview? = nil
+
+    static func resource(_ item: ResourceListItem, warning: String? = nil) -> InspectorSnapshot {
+        InspectorSnapshot(
+            title: item.title,
+            subtitle: nil,
+            command: nil,
+            detail: nil,
+            json: nil,
+            overview: ResourceOverview(item: item, warning: warning)
+        )
+    }
 
     static let empty = InspectorSnapshot(
         title: "Inspector",
-        subtitle: "Select a resource to inspect command output, JSON, metadata, and actions.",
+        subtitle: "Select a resource to view its details.",
         command: nil,
         detail: nil,
         json: nil
     )
 }
-

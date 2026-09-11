@@ -31,11 +31,52 @@ struct OperationService: Sendable {
         return await runOperation(title: operation.rawValue, arguments: arguments, timeout: timeout(for: operation), outputHandler: outputHandler)
     }
 
-    func runContainerCreateOrRun(_ request: ContainerCreateRunRequest, outputHandler: ProcessOutputHandler? = nil) async -> OperationOutcome {
-        guard !request.image.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return OperationOutcome(title: request.operation.rawValue, command: nil, result: nil, errorMessage: "Provide an image reference.")
+    func runContainerBatch(_ request: ContainerBatchRequest, outputHandler: ProcessOutputHandler? = nil) async -> ContainerBatchOutcome {
+        do {
+            try request.validate()
+        } catch {
+            let message = error.localizedDescription
+            return ContainerBatchOutcome(
+                operation: request.operation,
+                targets: request.targets,
+                itemResults: [],
+                commands: [],
+                batchResult: nil,
+                succeededIDs: [],
+                failedIDs: [],
+                errorMessage: message,
+                output: message
+            )
         }
-        return await runOperation(title: request.operation.rawValue, arguments: request.arguments, timeout: 60 * 30, outputHandler: outputHandler)
+
+        switch request.operation {
+        case .start:
+            return await runSequentialContainerStarts(request.targets, outputHandler: outputHandler)
+        case .stop, .delete:
+            return await runMultiContainerBatch(request, outputHandler: outputHandler)
+        case .create, .run, .kill, .logs, .stats, .copy, .export, .exec, .prune:
+            let error = ContainerBatchValidationError.unsupportedOperation(request.operation)
+            return ContainerBatchOutcome(
+                operation: request.operation,
+                targets: request.targets,
+                itemResults: [],
+                commands: [],
+                batchResult: nil,
+                succeededIDs: [],
+                failedIDs: [],
+                errorMessage: error.localizedDescription,
+                output: error.localizedDescription
+            )
+        }
+    }
+
+    func runContainerCreateOrRun(_ request: ContainerCreateRunRequest, outputHandler: ProcessOutputHandler? = nil) async -> OperationOutcome {
+        do {
+            let arguments = try request.validatedArguments()
+            return await runOperation(title: request.operation.rawValue, arguments: arguments, timeout: 60 * 30, outputHandler: outputHandler)
+        } catch {
+            return OperationOutcome(title: request.operation.rawValue, command: nil, result: nil, errorMessage: error.localizedDescription)
+        }
     }
 
     func runContainerCopy(_ request: ContainerCopyRequest, outputHandler: ProcessOutputHandler? = nil) async -> OperationOutcome {
@@ -149,6 +190,152 @@ struct OperationService: Sendable {
     func runBuilderOperation(_ operation: BuilderOperation, cpus: String = "", memory: String = "", outputHandler: ProcessOutputHandler? = nil) async -> OperationOutcome {
         let timeout: TimeInterval = operation == .start ? 60 * 30 : 60
         return await runOperation(title: "Builder \(operation.rawValue)", arguments: operation.arguments(cpus: cpus, memory: memory), timeout: timeout, outputHandler: outputHandler)
+    }
+
+    private func runSequentialContainerStarts(
+        _ targets: [ContainerBatchTarget],
+        outputHandler: ProcessOutputHandler?
+    ) async -> ContainerBatchOutcome {
+        var itemResults: [ContainerBatchItemResult] = []
+        var commands: [CLICommandPreview] = []
+        var succeededIDs: [String] = []
+        var failedIDs: [String] = []
+
+        for target in targets {
+            let outcome = await runOperation(
+                title: ContainerOperation.start.rawValue,
+                arguments: ["start", target.id],
+                timeout: timeout(for: .start),
+                outputHandler: outputHandler
+            )
+            let itemResult = ContainerBatchItemResult(
+                target: target,
+                command: outcome.command,
+                result: outcome.result,
+                errorMessage: outcome.errorMessage
+            )
+            itemResults.append(itemResult)
+            if let command = itemResult.command {
+                commands.append(command)
+            }
+            if itemResult.succeeded {
+                succeededIDs.append(target.id)
+            } else {
+                failedIDs.append(target.id)
+            }
+        }
+
+        return ContainerBatchOutcome(
+            operation: .start,
+            targets: targets,
+            itemResults: itemResults,
+            commands: commands,
+            batchResult: nil,
+            succeededIDs: succeededIDs,
+            failedIDs: failedIDs,
+            errorMessage: nil,
+            output: startBatchOutput(itemResults)
+        )
+    }
+
+    private func runMultiContainerBatch(
+        _ request: ContainerBatchRequest,
+        outputHandler: ProcessOutputHandler?
+    ) async -> ContainerBatchOutcome {
+        let identifiers = request.targets.map(\.id)
+        var arguments = [request.operation == .stop ? "stop" : "delete"]
+        if request.operation == .delete, request.forceDelete {
+            arguments.append("--force")
+        }
+        arguments.append(contentsOf: identifiers)
+
+        let operationOutcome = await runOperation(
+            title: request.operation.rawValue,
+            arguments: arguments,
+            timeout: timeout(for: request.operation),
+            outputHandler: outputHandler
+        )
+        let succeededIDs = operationOutcome.succeeded ? identifiers : []
+        let failedIDs = operationOutcome.succeeded ? [] : identifiers
+        let commands = operationOutcome.command.map { [$0] } ?? []
+
+        return ContainerBatchOutcome(
+            operation: request.operation,
+            targets: request.targets,
+            itemResults: [],
+            commands: commands,
+            batchResult: operationOutcome.result,
+            succeededIDs: succeededIDs,
+            failedIDs: failedIDs,
+            errorMessage: operationOutcome.errorMessage,
+            output: multiContainerBatchOutput(
+                operation: request.operation,
+                targets: request.targets,
+                succeeded: operationOutcome.succeeded,
+                operationOutcome: operationOutcome
+            )
+        )
+    }
+
+    private func startBatchOutput(_ results: [ContainerBatchItemResult]) -> String {
+        let failures = results.filter { !$0.succeeded }
+        let headline: String
+        if failures.isEmpty {
+            headline = "Started \(containerCount(results.count)): \(results.map { targetLabel($0.target) }.joined(separator: ", "))."
+        } else {
+            let succeededCount = results.count - failures.count
+            let failureNames = failures.map { targetLabel($0.target) }.joined(separator: ", ")
+            headline = "Failed to start \(failures.count) of \(containerCount(results.count)): \(failureNames)."
+                + (succeededCount == 0 ? "" : " \(containerCount(succeededCount)) succeeded.")
+        }
+
+        let details = results.compactMap { result -> String? in
+            let output = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+            return output.isEmpty ? nil : "\(targetLabel(result.target)): \(output)"
+        }
+        return ([headline] + details).joined(separator: "\n")
+    }
+
+    private func multiContainerBatchOutput(
+        operation: ContainerOperation,
+        targets: [ContainerBatchTarget],
+        succeeded: Bool,
+        operationOutcome: OperationOutcome
+    ) -> String {
+        let names = targets.map(targetLabel).joined(separator: ", ")
+        let action: String
+        if succeeded {
+            action = operation == .stop ? "Stopped" : "Deleted"
+        } else {
+            action = operation == .stop ? "Failed to stop" : "Failed to delete"
+        }
+        let headline = "\(action) \(containerCount(targets.count)): \(names)."
+        let detail = operationRuntimeOutput(operationOutcome).trimmingCharacters(in: .whitespacesAndNewlines)
+        return detail.isEmpty ? headline : "\(headline)\n\(detail)"
+    }
+
+    private func operationRuntimeOutput(_ outcome: OperationOutcome) -> String {
+        if let errorMessage = outcome.errorMessage {
+            return errorMessage
+        }
+        guard let result = outcome.result else {
+            return ""
+        }
+        let output = [result.stdout, result.stderr]
+            .filter { !$0.isEmpty }
+            .joined(separator: result.stdout.isEmpty || result.stderr.isEmpty ? "" : "\n")
+        if !output.isEmpty {
+            return output
+        }
+        return result.succeeded ? "" : "Command failed with exit code \(result.exitCode)."
+    }
+
+    private func containerCount(_ count: Int) -> String {
+        "\(count) \(count == 1 ? "container" : "containers")"
+    }
+
+    private func targetLabel(_ target: ContainerBatchTarget) -> String {
+        target.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? target.id : target.name
     }
 
     private func runOperation(title: String, arguments: [String], timeout: TimeInterval, outputHandler: ProcessOutputHandler? = nil) async -> OperationOutcome {
