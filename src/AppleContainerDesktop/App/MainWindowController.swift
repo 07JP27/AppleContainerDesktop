@@ -4,8 +4,8 @@ final class MainWindowController: NSWindowController {
     let shellViewController: AppShellViewController
     private let defaultContentSize = NSSize(width: 1120, height: 720)
 
-    init() {
-        shellViewController = AppShellViewController()
+    init(onRuntimeHealthChange: @escaping @MainActor (ServiceHealth) -> Void = { _ in }) {
+        shellViewController = AppShellViewController(onRuntimeHealthChange: onRuntimeHealthChange)
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: defaultContentSize.width, height: defaultContentSize.height),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],

@@ -36,7 +36,9 @@ The app uses `Process` with argument arrays to execute the resolved `container` 
 ## Implemented MVP scope
 
 - Runtime status: compact sidebar indicator for CLI detection, service status/version/df, and lifecycle controls.
-- Resources: searchable/sortable object lists and JSON inspect for containers, images, networks, volumes, and registries.
+- Dock icon: green while engine availability is confirmed, orange otherwise. Live updates use the existing runtime monitor while the app is open; Finder and the closed app keep the orange icon.
+- Resources: full-width searchable/sortable lists, Docker-style container checkbox selection and bulk lifecycle actions, dedicated Container/Image/Volume detail screens, browser links for published TCP ports, and an on-demand technical inspector.
+- Run/Create: native settings sheets with port, volume, and environment-variable rows, opt-in image port suggestions, collapsed advanced settings, and draft-preserving error recovery.
 - Operations: command history plus container create/run/start/stop/kill/delete/logs/stats/copy/export/Terminal exec/prune, image pull/build/push/tag/delete/prune, builder start/stop/delete/status, network and volume create/delete/prune, registry login/logout, and machine logs/stop/delete/set-default.
 - Settings: CLI executable override, detection details, service status, and read-only runtime properties.
 

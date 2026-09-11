@@ -67,7 +67,58 @@ struct ResourceListItem: Equatable, Sendable, Identifiable {
     var detail: String
     var inspectIdentifier: String?
     var rawJSON: String
-    var searchableText: String
+    var metadata: ResourceMetadata? = nil
+
+    var container: ContainerMetadata? {
+        if case .container(let metadata)? = metadata { return metadata }
+        return nil
+    }
+
+    var image: ImageMetadata? {
+        if case .image(let metadata)? = metadata { return metadata }
+        return nil
+    }
+
+    var volume: VolumeMetadata? {
+        if case .volume(let metadata)? = metadata { return metadata }
+        return nil
+    }
+
+    var searchableText: String {
+        if let volume {
+            var values = [
+                title,
+                status,
+                inspectIdentifier,
+                volume.driver,
+                volume.format,
+                volume.capacityBytes.map(String.init),
+                volume.isAnonymous ? "anonymous" : "named",
+                volume.usage.title
+            ].compactMap { $0 }
+            if let containers = volume.usage.containers {
+                values += containers.flatMap { [$0.name, $0.state, $0.mountTarget].compactMap { $0 } }
+            }
+            return values.joined(separator: " ")
+        }
+        return ([title, status, detail, inspectIdentifier, rawJSON, image?.usage.title]
+            + (container?.ports ?? []).map(\.displayValue))
+            .compactMap { $0 }.joined(separator: " ")
+    }
+
+    mutating func setImageUsage(_ usage: ImageUsage) {
+        guard var image else { return }
+        image.usage = usage
+        metadata = .image(image)
+        status = usage.title
+    }
+
+    mutating func setVolumeUsage(_ usage: VolumeUsage) {
+        guard var volume else { return }
+        volume.usage = usage
+        metadata = .volume(volume)
+        status = usage.title
+    }
 }
 
 struct ResourceListSnapshot: Equatable, Sendable {
@@ -77,15 +128,32 @@ struct ResourceListSnapshot: Equatable, Sendable {
     var items: [ResourceListItem]
     var errorMessage: String?
     var errorDetail: String?
+    var warningMessage: String? = nil
 }
 
-enum ResourceParserError: Error, Equatable {
+enum ResourceParserError: Error, Equatable, LocalizedError {
     case invalidJSON
+    case unexpectedShape(ResourceKind)
+    case missingIdentity(ResourceKind)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidJSON:
+            "The CLI returned invalid JSON."
+        case .unexpectedShape(let kind):
+            "The CLI returned an unsupported \(kind.rawValue.lowercased()) data format."
+        case .missingIdentity(let kind):
+            "The \(kind.rawValue.lowercased()) data is missing a required name or identifier."
+        }
+    }
 }
 
 struct ResourceJSONParser: Sendable {
     func parseList(_ output: String, kind: ResourceKind) throws -> [ResourceListItem] {
         guard !output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            if kind == .containers || kind == .images || kind == .volumes {
+                throw ResourceParserError.invalidJSON
+            }
             return []
         }
 
@@ -96,9 +164,9 @@ struct ResourceJSONParser: Sendable {
             throw ResourceParserError.invalidJSON
         }
 
-        let objects = extractObjects(from: object)
-        return objects.enumerated().map { index, object in
-            makeItem(index: index, object: object, kind: kind)
+        let objects = try extractObjects(from: object, kind: kind)
+        return try objects.enumerated().map { index, object in
+            try makeItem(index: index, object: object, kind: kind)
         }
     }
 
@@ -114,12 +182,18 @@ struct ResourceJSONParser: Sendable {
         return pretty
     }
 
-    private func extractObjects(from object: Any) -> [[String: Any]] {
+    private func extractObjects(from object: Any, kind: ResourceKind) throws -> [[String: Any]] {
         if let array = object as? [[String: Any]] {
             return array
         }
 
         if let dictionary = object as? [String: Any] {
+            if kind == .containers || kind == .images || kind == .volumes {
+                for key in [kind.rawValue.lowercased(), "items"] {
+                    if let array = dictionary[key] as? [[String: Any]] { return array }
+                }
+                return [dictionary]
+            }
             for value in dictionary.values {
                 if let array = value as? [[String: Any]] {
                     return array
@@ -128,10 +202,49 @@ struct ResourceJSONParser: Sendable {
             return [dictionary]
         }
 
+        if kind == .containers || kind == .images || kind == .volumes {
+            throw ResourceParserError.unexpectedShape(kind)
+        }
         return []
     }
 
-    private func makeItem(index: Int, object: [String: Any], kind: ResourceKind) -> ResourceListItem {
+    private func makeItem(index: Int, object: [String: Any], kind: ResourceKind) throws -> ResourceListItem {
+        if kind == .containers {
+            let metadata = try ResourceMetadataParser().container(from: object)
+            return ResourceListItem(
+                id: metadata.name,
+                title: metadata.name,
+                status: metadata.state,
+                detail: metadata.imageReference ?? "",
+                inspectIdentifier: metadata.name,
+                rawJSON: prettyObject(object),
+                metadata: .container(metadata)
+            )
+        }
+        if kind == .images {
+            let metadata = try ResourceMetadataParser().image(from: object)
+            return ResourceListItem(
+                id: metadata.reference.fullValue,
+                title: metadata.reference.fullValue,
+                status: metadata.usage.title,
+                detail: metadata.digest ?? "",
+                inspectIdentifier: metadata.reference.fullValue,
+                rawJSON: prettyObject(object),
+                metadata: .image(metadata)
+            )
+        }
+        if kind == .volumes {
+            let metadata = try ResourceMetadataParser().volume(from: object)
+            return ResourceListItem(
+                id: metadata.name,
+                title: metadata.name,
+                status: metadata.usage.title,
+                detail: volumeDetail(metadata),
+                inspectIdentifier: metadata.name,
+                rawJSON: prettyObject(object),
+                metadata: .volume(metadata)
+            )
+        }
         let title = firstValue(
             in: object,
             keys: titleKeys(for: kind)
@@ -153,16 +266,13 @@ struct ResourceJSONParser: Sendable {
         )
 
         let rawJSON = prettyObject(object)
-        let searchableText = ([title, status, detail, inspectIdentifier, rawJSON].compactMap { $0 }).joined(separator: " ")
-
         return ResourceListItem(
             id: inspectIdentifier ?? "\(kind.rawValue)-\(index)",
             title: title,
             status: status,
             detail: detail,
             inspectIdentifier: inspectIdentifier,
-            rawJSON: rawJSON,
-            searchableText: searchableText
+            rawJSON: rawJSON
         )
     }
 
@@ -299,6 +409,14 @@ struct ResourceJSONParser: Sendable {
             .prefix(3)
             .map { "\($0.key): \(stringValue($0.value))" }
             .joined(separator: " · ")
+    }
+
+    private func volumeDetail(_ volume: VolumeMetadata) -> String {
+        var values = [volume.driver, volume.format].compactMap { $0 }
+        if let capacity = volume.capacityBytes {
+            values.append("\(ResourceValueFormatter.bytes(capacity)) configured")
+        }
+        return values.joined(separator: " · ")
     }
 
     private func prettyObject(_ object: [String: Any]) -> String {

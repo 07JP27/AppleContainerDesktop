@@ -1,6 +1,17 @@
 import AppKit
 
 final class AppShellViewController: NSViewController, NSMenuItemValidation {
+    private struct InspectorFingerprint: Equatable {
+        var source: SidebarItem?
+        var title: String
+        var arguments: [String]?
+    }
+
+    private struct InspectorSuppression {
+        var fingerprint: InspectorFingerprint
+        var completed: Bool
+    }
+
     private let sidebarContainer = NSView()
     private let sidebarStack = NSStackView()
     private let runtimeStatusView = SidebarStatusView(title: "Checking runtime...", health: .unknown)
@@ -8,14 +19,35 @@ final class AppShellViewController: NSViewController, NSMenuItemValidation {
     private let inspectorContainer = NSView()
     private let inspectorStack = NSStackView()
     private let inspectorScrollView = NSScrollView()
-    private let systemService = SystemService()
+    private let systemService: SystemService
+    private let resourceService: ResourceService
+    private let operationService: OperationService
+    private let onRuntimeHealthChange: @MainActor (ServiceHealth) -> Void
     private var splitView: NSSplitView?
     private var inspectorWidthConstraint: NSLayoutConstraint?
-    private var selectedItem = SidebarItem.containers
+    private(set) var selectedItem = SidebarItem.containers
     private var sidebarRows: [SidebarItem: SidebarRowView] = [:]
-    private var currentContentViewController: NSViewController?
+    private(set) var currentContentViewController: NSViewController?
     private var cachedContentViewControllers: [SidebarItem: NSViewController] = [:]
     private var runtimeStatusRefreshTask: Task<Void, Never>?
+    private var currentInspectorFingerprint: InspectorFingerprint?
+    private var currentInspectorCompleted = false
+    private var inspectorSuppression: InspectorSuppression?
+
+    init(
+        systemService: SystemService = SystemService(),
+        resourceService: ResourceService = ResourceService(),
+        operationService: OperationService = OperationService(),
+        onRuntimeHealthChange: @escaping @MainActor (ServiceHealth) -> Void = { _ in }
+    ) {
+        self.systemService = systemService
+        self.resourceService = resourceService
+        self.operationService = operationService
+        self.onRuntimeHealthChange = onRuntimeHealthChange
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) { nil }
 
     deinit {
         runtimeStatusRefreshTask?.cancel()
@@ -50,7 +82,6 @@ final class AppShellViewController: NSViewController, NSMenuItemValidation {
 
         splitView.addArrangedSubview(sidebar)
         splitView.addArrangedSubview(main)
-        splitView.addArrangedSubview(inspector)
 
         view.addSubview(splitView)
         NSLayoutConstraint.activate([
@@ -60,9 +91,7 @@ final class AppShellViewController: NSViewController, NSMenuItemValidation {
             splitView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             sidebar.widthAnchor.constraint(equalToConstant: 196)
         ])
-        inspectorWidthConstraint = inspector.widthAnchor.constraint(equalToConstant: 0)
-        inspectorWidthConstraint?.isActive = true
-        inspector.isHidden = true
+        inspectorWidthConstraint = inspector.widthAnchor.constraint(equalToConstant: 320)
     }
 
     private func makeSidebar() -> NSView {
@@ -128,11 +157,34 @@ final class AppShellViewController: NSViewController, NSMenuItemValidation {
         inspectorScrollView.drawsBackground = false
         inspectorScrollView.translatesAutoresizingMaskIntoConstraints = false
 
+        let closeButton = ClosureButton(title: "Close") { [weak self] in
+            self?.closeInspector()
+        }
+        closeButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: nil)
+        closeButton.imagePosition = .imageOnly
+        closeButton.isBordered = false
+        closeButton.toolTip = "Close inspector"
+        closeButton.setAccessibilityLabel("Close inspector")
+        closeButton.translatesAutoresizingMaskIntoConstraints = false
+
+        let inspectorHeader = NSStackView()
+        inspectorHeader.orientation = .horizontal
+        inspectorHeader.alignment = .centerY
+        inspectorHeader.translatesAutoresizingMaskIntoConstraints = false
+        inspectorHeader.addArrangedSubview(NSView())
+        inspectorHeader.addArrangedSubview(closeButton)
+
+        container.addSubview(inspectorHeader)
         container.addSubview(inspectorScrollView)
         NSLayoutConstraint.activate([
+            inspectorHeader.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: AppSpacing.sm),
+            inspectorHeader.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -AppSpacing.sm),
+            inspectorHeader.topAnchor.constraint(equalTo: container.topAnchor, constant: AppSpacing.sm),
+            closeButton.widthAnchor.constraint(equalToConstant: 28),
+            closeButton.heightAnchor.constraint(equalToConstant: 28),
             inspectorScrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             inspectorScrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            inspectorScrollView.topAnchor.constraint(equalTo: container.topAnchor),
+            inspectorScrollView.topAnchor.constraint(equalTo: inspectorHeader.bottomAnchor),
             inspectorScrollView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
             documentView.widthAnchor.constraint(equalTo: inspectorScrollView.contentView.widthAnchor),
             inspectorStack.leadingAnchor.constraint(equalTo: documentView.leadingAnchor, constant: AppSpacing.lg),
@@ -153,11 +205,12 @@ final class AppShellViewController: NSViewController, NSMenuItemValidation {
     private func select(_ item: SidebarItem) {
         selectedItem = item
         applySidebarSelectionStyles()
-        if item.resourceKind == nil {
+        if item.resourceKind == nil || item.resourceKind?.usesDedicatedDetail == true {
             updateInspector(.empty)
         }
 
         let nextViewController = viewController(for: item)
+        (nextViewController as? ResourceListViewController)?.showCollection(restoreFocus: false)
         replaceContent(with: nextViewController)
         if let reloadable = nextViewController as? ContentReloading {
             reloadable.reloadContent()
@@ -180,6 +233,8 @@ final class AppShellViewController: NSViewController, NSMenuItemValidation {
         } else if let resourceKind = item.resourceKind {
             nextViewController = ResourceListViewController(
                 kind: resourceKind,
+                service: resourceService,
+                operationService: operationService,
                 onInspectorUpdate: { [weak self] snapshot in
                     self?.updateInspector(snapshot, from: item)
                 },
@@ -217,6 +272,7 @@ final class AppShellViewController: NSViewController, NSMenuItemValidation {
             return
         }
 
+        (currentContentViewController as? ResourceListViewController)?.suspendInspection()
         currentContentViewController?.view.removeFromSuperview()
         currentContentViewController?.removeFromParent()
         currentContentViewController = viewController
@@ -278,7 +334,11 @@ final class AppShellViewController: NSViewController, NSMenuItemValidation {
         switch menuItem.action {
         case #selector(focusSearch):
             return currentContentViewController is SearchFocusHandling
-        case #selector(startSelectedContainer), #selector(stopSelectedContainer), #selector(showSelectedContainerLogs):
+        case #selector(startSelectedContainer):
+            return activeContainerShortcuts()?.canStartSelectedContainer == true
+        case #selector(stopSelectedContainer):
+            return activeContainerShortcuts()?.canStopSelectedContainer == true
+        case #selector(showSelectedContainerLogs):
             return activeContainerShortcuts()?.hasSelectedContainer == true
         default:
             return true
@@ -341,6 +401,7 @@ final class AppShellViewController: NSViewController, NSMenuItemValidation {
 
     private func updateRuntimeStatus(_ health: ServiceHealth) {
         runtimeStatusView.update(title: runtimeStatusTitle(for: health), health: health)
+        onRuntimeHealthChange(health)
     }
 
     private var cachedSystemViewController: SystemViewController? {
@@ -362,9 +423,34 @@ final class AppShellViewController: NSViewController, NSMenuItemValidation {
         }
     }
 
-    private func updateInspector(_ snapshot: InspectorSnapshot, from sourceItem: SidebarItem? = nil) {
+    func updateInspector(_ snapshot: InspectorSnapshot, from sourceItem: SidebarItem? = nil) {
         if let sourceItem, sourceItem != selectedItem {
             return
+        }
+
+        if let sourceItem, sourceItem.resourceKind?.usesDedicatedDetail == true, snapshot.overview != nil {
+            hideInspector(clearSuppression: true)
+            return
+        }
+
+        let fingerprint = InspectorFingerprint(
+            source: sourceItem,
+            title: snapshot.title,
+            arguments: snapshot.command?.arguments
+        )
+        let completed = snapshot.subtitle == "Succeeded" || snapshot.subtitle == "Failed"
+        if var suppression = inspectorSuppression, suppression.fingerprint == fingerprint {
+            if snapshot.subtitle == "Running...", suppression.completed {
+                inspectorSuppression = nil
+            } else {
+                suppression.completed = suppression.completed || completed
+                inspectorSuppression = suppression
+                currentInspectorFingerprint = fingerprint
+                currentInspectorCompleted = suppression.completed
+                return
+            }
+        } else if inspectorSuppression != nil {
+            inspectorSuppression = nil
         }
 
         inspectorStack.setViews([], in: .top)
@@ -372,10 +458,21 @@ final class AppShellViewController: NSViewController, NSMenuItemValidation {
             || snapshot.command != nil
             || snapshot.detail != nil
             || snapshot.json != nil
-        inspectorContainer.isHidden = !shouldShowInspector
-        inspectorWidthConstraint?.constant = shouldShowInspector ? 320 : 0
-        splitView?.adjustSubviews()
+            || snapshot.overview != nil
         guard shouldShowInspector else {
+            hideInspector(clearSuppression: true)
+            return
+        }
+        currentInspectorFingerprint = fingerprint
+        currentInspectorCompleted = completed
+        if inspectorContainer.superview == nil {
+            splitView?.addArrangedSubview(inspectorContainer)
+        }
+        inspectorWidthConstraint?.isActive = true
+        splitView?.adjustSubviews()
+
+        if let overview = snapshot.overview {
+            addInspectorView(ResourceOverviewView(overview: overview))
             return
         }
 
@@ -403,6 +500,40 @@ final class AppShellViewController: NSViewController, NSMenuItemValidation {
         if let json = snapshot.json, !json.isEmpty {
             addInspectorView(inspectorBlock(title: "JSON", value: json, monospaced: true))
         }
+    }
+
+    func closeInspector() {
+        if let fingerprint = currentInspectorFingerprint {
+            inspectorSuppression = InspectorSuppression(
+                fingerprint: fingerprint,
+                completed: currentInspectorCompleted
+            )
+        }
+        hideInspector(clearSuppression: false)
+        (currentContentViewController as? ResourceListViewController)?.restorePrimaryFocus()
+    }
+
+    private func hideInspector(clearSuppression: Bool) {
+        inspectorStack.setViews([], in: .top)
+        inspectorWidthConstraint?.isActive = false
+        if inspectorContainer.superview != nil {
+            splitView?.removeArrangedSubview(inspectorContainer)
+            inspectorContainer.removeFromSuperview()
+        }
+        splitView?.adjustSubviews()
+        currentInspectorFingerprint = nil
+        currentInspectorCompleted = false
+        if clearSuppression {
+            inspectorSuppression = nil
+        }
+    }
+
+    var isInspectorVisible: Bool {
+        inspectorContainer.superview === splitView
+    }
+
+    var inspectorWidth: CGFloat {
+        isInspectorVisible ? 320 : 0
     }
 
     private func addInspectorView(_ view: NSView) {
@@ -471,6 +602,8 @@ protocol SearchFocusHandling: AnyObject {
 @MainActor
 protocol ContainerShortcutHandling: AnyObject {
     var hasSelectedContainer: Bool { get }
+    var canStartSelectedContainer: Bool { get }
+    var canStopSelectedContainer: Bool { get }
     func startSelectedContainer()
     func stopSelectedContainer()
     func showSelectedContainerLogs()

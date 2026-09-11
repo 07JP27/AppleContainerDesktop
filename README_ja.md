@@ -36,7 +36,9 @@ make run
 ## MVP 実装範囲
 
 - Runtime status: sidebar 下部の compact indicator から開く CLI 検出、system status/version/df、lifecycle controls。
-- Resources: containers、images、networks、volumes、registries の検索/ソート可能な object list と JSON inspect。
+- Dock icon: アプリ起動中はエンジンの稼働確認済みで緑、それ以外はオレンジ。既存の runtime 監視に連動し、Finder 上とアプリ終了中はオレンジ固定です。
+- Resources: 全幅の検索/ソート可能な一覧、Docker Desktop 型の container checkbox 選択と一括 lifecycle 操作、Containers / Images / Volumes の専用詳細、公開 TCP port link、必要時だけの inspector。
+- Run/Create: ports・volumes・environment variables を行ごとに設定するネイティブシート。明示的に選ぶイメージのポート候補、折りたたみ式の詳細設定、失敗時の入力保持に対応。
 - Operations: command history、container create/run/start/stop/kill/delete/logs/stats/copy/export/Terminal exec/prune、image pull/build/push/tag/delete/prune、builder start/stop/delete/status、network/volume create/delete/prune、registry login/logout、machine logs/stop/delete/set-default。
 - Settings: CLI executable override、検出詳細、service status、read-only runtime properties。
 

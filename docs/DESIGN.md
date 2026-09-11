@@ -59,11 +59,11 @@ Canonical color values are specified in OKLCH. Swift 実装ではこの設計値
 
 ## App Shell
 
-The app uses a three-zone macOS layout.
+The app uses two persistent macOS zones plus an on-demand technical inspector.
 
 1. Sidebar: Containers, Images, Networks, Volumes, Registries, Operations, Settings, plus a compact runtime status indicator at the bottom.
-2. Primary content: object table, build form, operation history, settings surface, or runtime detail when opened from the status indicator.
-3. Detail / inspector: selected item summary, JSON inspect, logs, actions, metadata.
+2. Primary content: full-width object table, dedicated resource detail, build form, operation history, settings surface, or runtime detail when opened from the status indicator.
+3. On-demand inspector: explicit operation output, logs, errors, and JSON inspect for Apple-specific resources. Passive Containers, Images, and Volumes selection never opens or sizes this panel.
 
 The titlebar stays quiet: global actions live in menus and navigation rather than duplicated titlebar icons. Refresh is available from View > Refresh / Command-R; Settings remains available from the sidebar and app menu. Destructive actions never sit as a titlebar action.
 
@@ -71,10 +71,16 @@ The titlebar stays quiet: global actions live in menus and navigation rather tha
 
 - Runtime is not a primary navigation item. It is a compact bottom status indicator; opening it shows CLI availability, service health, versions, disk usage, and lifecycle controls.
 - The compact runtime status indicator always names runtime state. If Apple container CLI is missing, the indicator says the runtime is unavailable and the Runtime screen explains that the missing CLI is the cause.
+- The Dock icon supplements that text while the app runs: a green lamp means confirmed engine health, and the bundled orange lamp covers stopped, checking, unknown, or unavailable states. Finder and the non-running app use the orange icon; they are not live engine indicators.
+- Dock image overrides are fully composed images, not raw square artwork. The green runtime image includes transparent margins, a continuous-corner tile, and a restrained shadow on the same 1024-point canvas as a normal macOS icon (824-point tile, 100-point inset). Generate its 512/1024-pixel renditions with `xcrun swift scripts/prepare-dock-icon.swift <green-source.png> src/AppleContainerDesktop/Resources/AppIcon.xcassets/RuntimeRunningIcon.imageset`; do not replace those renditions with simple square resizes. The orange AppIcon is still normalized by macOS.
 - Runtime remains keyboard-accessible from View > Runtime Status (`⌘0`) because it can contain required service-start controls.
 - The default surface is Containers. If `container` is missing, resource lists show a concise install-required state with Apple's signed GitHub Release installer package as the primary path.
-- Containers uses a table-first layout with a persistent detail inspector.
-- Images uses table + tag / digest metadata + pull / push / build operations.
+- Containers, Images, and Volumes use full-width collection tables. Images and Volumes open details from their row; Containers separate bulk selection from navigation in the same way as Docker Desktop.
+- Containers use leading checkboxes, a tri-state select-all header, a selection toolbar for Start / Stop / Delete, and compact row Actions. The linked Name, a row double-click, or Return opens details; an ordinary row click only selects it.
+- Arrow keys move table selection without opening details. Controls embedded in rows, such as checkboxes, published TCP links, and Actions, retain their direct action and never also navigate.
+- Containers details show the readable overview and state-aware lifecycle actions.
+- Images details show tag / digest / platform / usage metadata and image actions.
+- Volumes details show only metadata and container usage that Apple `container` provides; Docker-only file browsing and export features are not implied.
 - Build image is an Images action with command preview and streamed progress output, not a top-level collection.
 - Machines and builder controls are technical runtime details and stay out of the default Runtime screen.
 - Operations exposes command history and execution results.
@@ -85,7 +91,7 @@ The titlebar stays quiet: global actions live in menus and navigation rather tha
 
 ### Tables
 
-Tables are the default for containers, images, networks, volumes, and registries. Each table supports search, filter chips, sortable columns, keyboard row navigation, and empty states.
+Tables are the default for containers, images, networks, volumes, and registries. Each table supports search, filter chips, sortable columns, keyboard row navigation, and empty states. Container checkbox selection is identity-based across sorting and refresh; filtering removes hidden targets before any bulk lifecycle operation.
 
 ### Status chips
 
@@ -97,7 +103,7 @@ Long-running operations appear as rows with progress, command preview, elapsed t
 
 ### Technical details
 
-Raw command output and JSON are hidden by default on primary screens. Surface them for failures, explicit technical-detail disclosure, or Operations / inspector contexts. The default UI should show state, value, and next action before implementation details.
+Raw command output and JSON are hidden by default on primary screens. Surface them for failures, explicit technical-detail disclosure, or Operations / inspector contexts. The on-demand inspector has an explicit Close control and never reopens from passive comparable-resource selection. Closing it does not cancel an operation; durable results remain in Operations. The default UI should show state, value, and next action before implementation details.
 
 ### Forms
 

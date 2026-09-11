@@ -79,6 +79,10 @@ MVP は Docker Engine の完全互換実装ではなく、Apple `container` CLI 
 ### 6.2 ダッシュボード
 
 - system service の running / stopped / unhealthy を表示する。
+- Dock アイコンのランプは、アプリ起動中にエンジン稼働を確認できた場合だけ緑とする。停止、確認中、状態不明、CLI 未検出、接続エラーでは標準のオレンジへ戻す。コンテナの起動数では判定しない。
+- Dock アイコンは既存の runtime 状態監視（各確認の完了後に約 5 秒間隔）と Runtime 画面の操作結果に連動させ、追加の常駐プロセスやポーリングを設けない。同じ状態の間は画像を繰り返し設定しない。
+- 緑の Dock 差し替え画像には透明な外周余白と連続した角丸を含め、オレンジの標準アイコンと同じタイルサイズで表示する。正方形の元画像をそのまま `applicationIconImage` に渡さない。
+- Finder 上とアプリ終了中のアイコンはオレンジ固定とし、終了時に Dock の一時的なアイコンを解除する。アプリ終了中のエンジン稼働状態はアイコンからは分からない。色だけに依存せず、sidebar の runtime 状態テキストを引き続き表示する。
 - CLI version と API server version を表示する。
 - `container system df --format json` によるディスク使用量を表示する。
 - 最近の container / image / build 操作をローカル履歴として表示する。
@@ -87,8 +91,17 @@ MVP は Docker Engine の完全互換実装ではなく、Apple `container` CLI 
 ### 6.3 Containers
 
 - `container list --all --format json` でコンテナ一覧を表示する。
-- 状態、名前、ID、イメージ、作成日時、ポート公開、ネットワーク、リソース使用量を一覧で確認できる。
-- 詳細画面では `container inspect` の JSON を構造化表示する。
+- 一覧は先頭の選択 checkbox、Name、Status、Image、Port(s)、Last started、末尾の Actions で構成する。Last started は実際の起動日時を使い、作成日時で代用しない。
+- 一覧は通常時に全幅を使う。通常の行クリックは選択だけを行い、Name link、行の double click、または Return で専用詳細画面へ遷移する。checkbox、公開 port、Actions の操作からは詳細を開かない。Back で検索・ソート・選択・スクロール位置を復元する。
+- checkbox は複数選択と header の visible items 全選択に対応し、未選択・一部選択・全選択を区別する。選択は ID で保持して sort / refresh 後も同じ container を指すようにし、filter で隠れた container は一括操作対象から除外する。
+- 未選択時は Run / Create / Prune、選択時は選択数と Start / Stop / Delete / Clear を表示する。混在選択では Start は stopped のみ、Stop は running のみを対象にし、対象外の状態を失敗として扱わない。
+- Apple `container` 1.0 の引数仕様に合わせ、複数 Start は 1 件ずつ順番に継続実行し、Stop と Delete は複数 ID を 1 command に渡す。一部 Start が失敗しても残りを実行し、全体を成功扱いにしない。
+- running container を含む Delete は、終了して削除することを明示する一括確認後だけ `container delete --force` を使う。Cancel、無効な選択、二重 submit では command を実行しない。
+- Actions 列は状態に応じた Start / Stop と、Logs、Stats、Copy、Exec、Export、Kill、Delete など既存操作への More menu を提供する。行 action は bulk selection を暗黙に変更せず、その行だけを対象にする。
+- 専用詳細画面には、状態、イメージ、作成・起動日時、公開ポート、ネットワークと IP、マウント、CPU・メモリの割り当て、実行コマンドなどをラベル付きの概要として表示する。
+- running container の単一 TCP 公開ポートは、Containers 一覧と専用詳細画面から `http://<host>:<published-port>/` を既定ブラウザで開けるようにする。`0.0.0.0` はアクセス可能な `localhost` に置き換え、UDP にはブラウザリンクを表示しない。ポート範囲は先頭ポートであることを明示する。
+- コンテナ選択時の生 JSON、JSON の折りたたみ、内部の inspect コマンド表示は提供しない。CLI の JSON はデータ取得にのみ使う。
+- CPU・メモリの常時計測は一覧に追加せず、既存の Stats 操作で確認する。割り当て量と実際の使用量を混同しない。
 - 以下の操作を提供する。
   - create
   - run
@@ -105,9 +118,30 @@ MVP は Docker Engine の完全互換実装ではなく、Apple `container` CLI 
 - logs は stream 表示と検索を提供する。
 - exec はアプリ内ターミナルまたは macOS Terminal 連携で提供する。
 
+#### Run / Create settings
+
+- Containers の Run / Create と Images の Run は、共通の macOS ネイティブ設定シートを使う。固定サイズの NSAlert に入力項目を詰め込まない。
+- イメージ参照と操作ボタンは常に見える位置に置き、設定部分を縦スクロール可能にする。入力欄は行追加や画面の高さ変更でも潰れない高さを保つ。
+- 基本設定は container name、ports、volumes、environment variables とする。CPU、memory、network、platform、command override、終了後の削除は Advanced settings に折りたたむ。
+- Ports、Volumes、Environment variables はラベル付きの追加・削除できる入力行を使う。値に含まれるカンマ、空白、等号を区切り文字として扱わない。
+- Ports は明示的な host port と container port、TCP / UDP、および必要に応じた host address を指定する。自動的なホストポート割り当ては行わず、host address が空なら現在の CLI と同じ all interfaces の扱いであることを表示する。
+- ポートの使用状況やランタイムのバージョン固有の制約は実行時にも確認される。例えば Apple container 1.0 は port 1 と同一 protocol / host port の複数 address への割り当てを拒否するため、標準的に有効な入力でも CLI が拒否した場合は設定を保持してエラーを表示する。
+- ローカルイメージの OCI ExposedPorts を候補として表示する。候補を追加して host port を指定したものだけ公開し、宣言されたポートを勝手に公開しない。明示的な platform 指定があれば候補を絞り、platform ごとの宣言の違いを表示する。
+- ポート候補のためにイメージを pull しない。宣言がない場合とメタデータ取得に失敗した場合を区別し、どちらでも手入力を続けられるようにする。遅れて届いた別イメージの候補で入力内容を上書きしない。
+- Volumes は host folder / named volume、container path、read only を指定する。host folder は標準のフォルダ選択パネルから選べる。新しい named volume の作成は設定シートを開いた時ではなく、CLI の実行時に行われる。
+- Environment の空の値は `NAME=` として渡す。ホスト環境からの値の継承は明示的に選んだ場合のみ `NAME` として渡し、空の入力から推測しない。
+- Run は従来通り background 実行とし、操作できない Detach checkbox は表示しない。Create は起動せず、detach / remove-after-exit を指定しない。
+- 入力エラーは該当する欄に表示し、CLI 実行前にも検証する。実行中の二重送信を防ぎ、失敗時は入力内容を保ったまま修正・再試行できるようにする。実行前の Cancel ではリソースを変更しない。
+
 ### 6.4 Images
 
 - `container image list --format json` でローカルイメージ一覧を表示する。
+- 一覧列は Name、Tag、Digest、Created、Size、In use とする。表示用の名前・タグと、操作に使う完全なイメージ参照を分離する。
+- Digest は OCI index / manifest の識別子であり、Docker の Image ID と同一の意味ではない。
+- Size は取得できた実行用 platform variant の OCI コンテンツサイズを合計する。同じ variant digest は重複計上せず、attestation は除く。共有 layer が重複する場合があり、物理ディスク使用量ではないことを tooltip で説明する。
+- In use は停止中を含むコンテナとの参照関係から判定する。判定できない場合は未使用にせず、情報不足や取得失敗を明示する。
+- 一覧は通常時に全幅を使い、行クリックまたは Return で専用詳細画面へ遷移する。専用詳細には名前・タグ・Digest・作成日時・サイズ・対応 platform・使用しているコンテナの概要のみを表示し、生 JSON や技術情報への切り替えは提供しない。
+- 日時・サイズは型に沿ってソートし、取得できない値は `--` と理由を表示する。未知の作成日時を epoch の日付として表示しない。
 - pull / push / tag / delete / prune / inspect を提供する。
 - `container build` による Dockerfile build UI を提供する。
 - build context、Dockerfile path、tag、platform、build args、secret、progress mode を指定できる。
@@ -128,6 +162,9 @@ MVP は Docker Engine の完全互換実装ではなく、Apple `container` CLI 
 ### 6.7 Volumes
 
 - `container volume list --format json` でボリューム一覧を表示する。
+- 一覧は通常時に全幅を使い、行クリックまたは Return で専用詳細画面へ遷移する。
+- 専用詳細には named / anonymous、driver、filesystem format、作成日時、設定容量、使用している running / stopped container と mount target を表示する。`sizeInBytes` は現在のディスク使用量ではなく設定容量として扱う。
+- runtime 内部の backing path、生 JSON、Docker Desktop 固有の Stored data、clone、import/export、scheduled export は表示・提供しない。
 - create / delete / prune / inspect を提供する。
 - コンテナ作成 / 実行時に volume mount を選択できる。
 
@@ -166,16 +203,17 @@ UI は Docker Desktop の代替品ではなく、Apple `container` CLI を扱う
 
 ### 7.2 画面構成
 
-- 基本 layout は 3 pane 構成にする。
+- 基本 layout は常設 2 pane と必要時だけ表示する inspector で構成する。
   - Sidebar: Containers、Images、Networks、Volumes、Registries、Operations、Settings と下部 runtime status indicator
-  - Main: table、list、form、runtime control、settings
-  - Inspector: 選択項目の metadata、JSON inspect、logs、actions
+  - Main: 全幅 table、Containers / Images / Volumes の専用詳細、form、runtime control、settings
+  - Inspector: Networks / Registries / Machines の inspect、明示的な logs・操作結果・エラー。Close で操作を中断せずに一覧幅を戻せる
 - Runtime detail は主ナビではなく、下部 status indicator から開く。CLI / API server version、disk usage、lifecycle controls を扱う。
 - Runtime detail は View > Runtime Status (`⌘0`) からも開ける。runtime は主ナビではないが、service start が必要な場合に keyboard / VoiceOver で到達可能にする。
 - Build は top-level object collection ではなく Images の action として扱う。
 - Machines は top-level collection ではなく runtime control state として扱う。
 - `container` CLI が未検出の場合は、初期画面の Containers に concise install-required state を表示し、GitHub Release signed installer package を案内する。長い runtime 説明を初期画面に出さない。
 - Containers / Images / Networks / Volumes / Registries は table-first UI にする。
+- Containers / Images / Volumes の passive selection では inspector を開かない。Containers の checkbox / port link / Actions、その他の行内 control は詳細遷移と同時に発火させない。
 - Logs、build progress、pull / push progress は terminal-like panel として表示するが、app chrome は macOS native に保つ。
 
 ### 7.3 視覚システム

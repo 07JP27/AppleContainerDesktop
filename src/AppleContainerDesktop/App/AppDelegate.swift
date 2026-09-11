@@ -3,14 +3,22 @@ import AppKit
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var windowController: MainWindowController?
+    private let runtimeDockIcon = RuntimeDockIconController()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
-        let windowController = MainWindowController()
+        runtimeDockIcon.reset()
+        let windowController = MainWindowController(onRuntimeHealthChange: { [weak self] health in
+            self?.runtimeDockIcon.update(health)
+        })
         self.windowController = windowController
         installMainMenu(target: windowController.shellViewController)
         windowController.showMainWindow()
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        runtimeDockIcon.reset()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
